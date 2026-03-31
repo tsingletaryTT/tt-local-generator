@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# tt-gen — launcher for the tt-local-generator UI.
+#
+# Selects the system Python3 (/usr/bin/python3) explicitly so the app
+# always gets the GTK4/GI bindings installed system-wide, regardless of
+# any active virtualenv.
+#
+# Usage:
+#   ./tt-gen            # launch the UI
+#   ./tt-gen --help     # pass flags through to main.py
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Use the system Python3 — GTK4 introspection bindings are installed there,
+# not inside virtualenvs.
+PYTHON=/usr/bin/python3
+
+if [[ ! -x "$PYTHON" ]]; then
+    echo "ERROR: $PYTHON not found. Install python3 via your package manager." >&2
+    exit 1
+fi
+
+# Sanity-check that GTK introspection bindings are available.
+if ! "$PYTHON" -c "import gi" 2>/dev/null; then
+    echo "ERROR: Python GObject introspection (python3-gi) not found." >&2
+    echo "       Run: sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0" >&2
+    exit 1
+fi
+
+exec "$PYTHON" "$SCRIPT_DIR/main.py" "$@"
