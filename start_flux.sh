@@ -42,11 +42,11 @@ if [[ ! -d "$REPO_DIR" ]]; then
     exit 1
 fi
 
-# Check if FLUX weights are cached (model dir name matches HF repo slug)
-HF_MODEL_SLUG=$(echo "$MODEL" | tr '/' '_' | tr '[:upper:]' '[:lower:]')
-# FLUX.1-dev → black-forest-labs/FLUX.1-dev
+# Check if FLUX weights are cached.
+# HuggingFace CLI stores repos as models--{org}--{name}, preserving dots in the name.
+# e.g. black-forest-labs/FLUX.1-dev → models--black-forest-labs--FLUX.1-dev
 HF_REPO="black-forest-labs/${MODEL}"
-HF_CACHE_DIR="$HF_CACHE/hub/models--black-forest-labs--${MODEL//./-}"
+HF_CACHE_DIR="$HF_CACHE/hub/models--black-forest-labs--${MODEL}"
 if [[ ! -d "$HF_CACHE_DIR" ]]; then
     echo "WARNING: FLUX weights not found at $HF_CACHE_DIR"
     echo "         Pre-download with:"
