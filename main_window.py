@@ -157,11 +157,32 @@ scrollbar slider {
 scrollbar slider:hover {
     background-color: #4FD1C5;
 }
+.card-selected {
+    border-color: #4FD1C5;
+    border-width: 2px;
+}
+.detail-section {
+    color: #4FD1C5;
+    font-weight: bold;
+    font-size: 11px;
+    margin-top: 6px;
+}
+.mono {
+    font-family: monospace;
+    font-size: 11px;
+    color: #607D8B;
+}
+.detail-empty {
+    color: #2D5566;
+    font-size: 15px;
+}
 """
 
-_THUMB_W = 220
-_THUMB_H = 124   # 16:9
-_GALLERY_COLS = 3
+_THUMB_W = 200
+_THUMB_H = 112   # 16:9
+_GALLERY_COLS = 2
+_DETAIL_VIDEO_W = 480
+_DETAIL_VIDEO_H = 270
 
 
 def _apply_css() -> None:
@@ -212,17 +233,37 @@ class _QueueItem:
 
 class GenerationCard(Gtk.Frame):
     """
-    Card showing thumbnail, prompt, time, and action buttons for one generation.
-    iterate_cb(prompt, neg_prompt, seed_image_path) called when ↺ Iterate clicked.
+    Thumbnail card in the gallery. Click anywhere on the card to select it and
+    show full details in the DetailPanel. Buttons: 💾 Save, ↺ Iterate.
+    select_cb(self) is called when the card is clicked.
     """
 
-    def __init__(self, record: GenerationRecord, iterate_cb):
+    def __init__(self, record: GenerationRecord, iterate_cb, select_cb):
         super().__init__()
         self._record = record
         self._iterate_cb = iterate_cb
+        self._select_cb = select_cb
         self.add_css_class("card")
         self.set_size_request(_THUMB_W + 20, -1)
         self._build()
+
+        # Clicking anywhere on the card selects it in the detail panel.
+        gesture = Gtk.GestureClick()
+        gesture.connect("pressed", lambda *_: self._select_cb(self))
+        self.add_controller(gesture)
+
+        # Hovering over the card plays the video in the thumbnail area (if available).
+        if record.video_exists:
+            motion = Gtk.EventControllerMotion()
+            motion.connect("enter", self._on_hover_enter)
+            motion.connect("leave", self._on_hover_leave)
+            self.add_controller(motion)
+
+    def set_selected(self, selected: bool) -> None:
+        if selected:
+            self.add_css_class("card-selected")
+        else:
+            self.remove_css_class("card-selected")
 
     def _build(self) -> None:
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
@@ -232,55 +273,44 @@ class GenerationCard(Gtk.Frame):
         box.set_margin_end(8)
         self.set_child(box)
 
-        # Media area: stack switching between thumbnail and inline video player
+        # Media area: thumbnail normally; hover swaps in a silent looping video preview.
         self._media_stack = Gtk.Stack()
         self._media_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
-        self._media_stack.set_transition_duration(150)
+        self._media_stack.set_transition_duration(120)
 
-        # Page 1: static thumbnail
         if self._record.thumbnail_exists:
             thumb = _make_image_widget(self._record.thumbnail_path, _THUMB_W, _THUMB_H)
         else:
-            thumb = _make_image_widget("", _THUMB_W, _THUMB_H, "🎬\n(no preview)")
+            thumb = _make_image_widget("", _THUMB_W, _THUMB_H, "🎬")
         self._media_stack.add_named(thumb, "thumb")
 
-        # Page 2: inline video player (GTK4 Gtk.Video via GStreamer)
         if self._record.video_exists:
-            self._video = Gtk.Video.new_for_filename(self._record.video_path)
-            self._video.set_autoplay(False)
-            self._video.set_loop(True)
-            self._video.set_size_request(_THUMB_W, _THUMB_H)
-            self._media_stack.add_named(self._video, "video")
+            self._hover_video = Gtk.Video.new_for_filename(self._record.video_path)
+            self._hover_video.set_autoplay(False)
+            self._hover_video.set_loop(True)
+            self._hover_video.set_size_request(_THUMB_W, _THUMB_H)
+            self._media_stack.add_named(self._hover_video, "video")
+        else:
+            self._hover_video = None
 
         box.append(self._media_stack)
 
-        # Seed image inset
-        if self._record.seed_image_path and Path(self._record.seed_image_path).exists():
-            seed_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-            seed_lbl = Gtk.Label(label="Seed:")
-            seed_lbl.add_css_class("teal")
-            seed_lbl.set_attributes(_small_attrs())
-            seed_row.append(seed_lbl)
-            seed_img = _make_image_widget(self._record.seed_image_path, 48, 27)
-            seed_row.append(seed_img)
-            box.append(seed_row)
-
-        # Prompt (2-line max)
+        # Prompt (2-line max, tooltip shows full text)
         prompt_lbl = Gtk.Label(label=self._record.prompt)
         prompt_lbl.set_wrap(True)
         prompt_lbl.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-        prompt_lbl.set_max_width_chars(28)
+        prompt_lbl.set_max_width_chars(26)
         prompt_lbl.set_lines(2)
         prompt_lbl.set_ellipsize(Pango.EllipsizeMode.END)
         prompt_lbl.set_tooltip_text(self._record.prompt)
         prompt_lbl.set_xalign(0)
         box.append(prompt_lbl)
 
-        # Meta row
+        # Meta row: time on left, generation duration on right
         meta = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         time_lbl = Gtk.Label(label=self._record.display_time)
         time_lbl.add_css_class("muted")
-        dur_text = f"{self._record.duration_s:.0f}s" if self._record.duration_s else ""
+        dur_text = _fmt_duration(self._record.duration_s) if self._record.duration_s else ""
         dur_lbl = Gtk.Label(label=dur_text)
         dur_lbl.add_css_class("muted")
         meta.append(time_lbl)
@@ -290,14 +320,8 @@ class GenerationCard(Gtk.Frame):
         meta.append(dur_lbl)
         box.append(meta)
 
-        # Buttons
+        # Buttons: Save and Iterate (play/fullscreen are in the detail panel)
         btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
-        self._play_btn = Gtk.Button(label="▶ Play")
-        self._play_btn.set_tooltip_text("Play video inline")
-        self._play_btn.connect("clicked", self._toggle_play)
-        full_btn = Gtk.Button(label="⛶")
-        full_btn.set_tooltip_text("Open in full-size player (maximized window)")
-        full_btn.connect("clicked", self._open_fullsize)
         export_btn = Gtk.Button(label="💾 Save")
         export_btn.set_tooltip_text("Export video to a chosen location")
         export_btn.connect("clicked", self._export)
@@ -305,32 +329,22 @@ class GenerationCard(Gtk.Frame):
         iter_btn.set_tooltip_text("Re-use this prompt in the control panel")
         iter_btn.connect("clicked", self._iterate)
         if not self._record.video_exists:
-            self._play_btn.set_sensitive(False)
-            full_btn.set_sensitive(False)
             export_btn.set_sensitive(False)
-        btn_row.append(self._play_btn)
-        btn_row.append(full_btn)
         btn_row.append(export_btn)
         btn_row.append(iter_btn)
         box.append(btn_row)
 
-    def _toggle_play(self, _btn) -> None:
-        if self._media_stack.get_visible_child_name() == "thumb":
+    def _on_hover_enter(self, _ctrl, _x, _y) -> None:
+        """Start looping the video silently when the mouse enters the card."""
+        if self._hover_video is not None:
             self._media_stack.set_visible_child_name("video")
-            self._video.get_media_stream().play()
-            self._play_btn.set_label("⏹ Stop")
-        else:
-            self._video.get_media_stream().pause()
-            self._media_stack.set_visible_child_name("thumb")
-            self._play_btn.set_label("▶ Play")
+            self._hover_video.get_media_stream().play()
 
-    def _open_fullsize(self, _btn) -> None:
-        """Open the video in a large standalone player window."""
-        if not self._record.video_exists:
-            return
-        parent = self.get_root()
-        win = VideoPlayerWindow(self._record, parent)
-        win.present()
+    def _on_hover_leave(self, _ctrl) -> None:
+        """Stop the video and revert to the thumbnail when the mouse leaves."""
+        if self._hover_video is not None:
+            self._hover_video.get_media_stream().pause()
+            self._media_stack.set_visible_child_name("thumb")
 
     def _export(self, _btn) -> None:
         if not self._record.video_exists:
@@ -358,6 +372,247 @@ class GenerationCard(Gtk.Frame):
             self._record.negative_prompt,
             self._record.seed_image_path,
         )
+
+
+# ── Duration formatting helper ────────────────────────────────────────────────
+
+def _fmt_duration(seconds: float) -> str:
+    """Format a duration in seconds to a human-readable string like '5m 12s' or '42s'."""
+    s = int(seconds)
+    m, s = divmod(s, 60)
+    return f"{m}m {s:02d}s" if m else f"{s}s"
+
+
+# ── Detail panel ───────────────────────────────────────────────────────────────
+
+class DetailPanel(Gtk.ScrolledWindow):
+    """
+    Right-side panel showing the selected video at a larger size with full
+    generation metadata. Populated by show_record(); shows a placeholder when empty.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self.set_vexpand(True)
+        self.set_hexpand(False)
+        self.set_size_request(420, -1)
+        self._record: Optional[GenerationRecord] = None
+        self._iterate_cb = None
+        self._video_widget: Optional[Gtk.Video] = None
+        self._play_btn: Optional[Gtk.Button] = None
+        self._show_empty()
+
+    def _show_empty(self) -> None:
+        """Render the placeholder 'no selection' state."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        box.set_vexpand(True)
+        box.set_hexpand(True)
+        lbl = Gtk.Label(label="← Click a video to preview")
+        lbl.add_css_class("detail-empty")
+        lbl.set_vexpand(True)
+        lbl.set_valign(Gtk.Align.CENTER)
+        lbl.set_halign(Gtk.Align.CENTER)
+        box.append(lbl)
+        self.set_child(box)
+
+    def show_record(self, record: GenerationRecord, iterate_cb) -> None:
+        """Populate the panel with a completed generation record."""
+        self._record = record
+        self._iterate_cb = iterate_cb
+
+        # Pause any previously playing video before replacing it
+        if self._video_widget is not None:
+            stream = self._video_widget.get_media_stream()
+            if stream and stream.get_playing():
+                stream.pause()
+        self._video_widget = None
+        self._play_btn = None
+
+        content = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        content.set_margin_top(12)
+        content.set_margin_bottom(12)
+        content.set_margin_start(12)
+        content.set_margin_end(12)
+
+        # ── Video player ──────────────────────────────────────────────────────
+        if record.video_exists:
+            self._video_widget = Gtk.Video.new_for_filename(record.video_path)
+            self._video_widget.set_autoplay(False)
+            self._video_widget.set_loop(True)
+            self._video_widget.set_size_request(_DETAIL_VIDEO_W, _DETAIL_VIDEO_H)
+            self._video_widget.set_hexpand(False)
+            self._video_widget.set_halign(Gtk.Align.START)
+            content.append(self._video_widget)
+
+            # Play/pause + fullscreen controls
+            ctrl_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            self._play_btn = Gtk.Button(label="▶ Play")
+            self._play_btn.connect("clicked", self._toggle_play)
+            ctrl_row.append(self._play_btn)
+            full_btn = Gtk.Button(label="⛶ Fullscreen")
+            full_btn.set_tooltip_text("Open in maximized window (F for true fullscreen)")
+            full_btn.connect("clicked", self._open_fullscreen)
+            ctrl_row.append(full_btn)
+            content.append(ctrl_row)
+        else:
+            # No video file — show large thumbnail or placeholder
+            if record.thumbnail_exists:
+                thumb = _make_image_widget(record.thumbnail_path, _DETAIL_VIDEO_W, _DETAIL_VIDEO_H)
+            else:
+                thumb = _make_image_widget("", _DETAIL_VIDEO_W, _DETAIL_VIDEO_H, "🎬\n(video not found)")
+            content.append(thumb)
+
+        # ── Prompt ────────────────────────────────────────────────────────────
+        content.append(self._detail_section("Prompt"))
+        prompt_lbl = Gtk.Label(label=record.prompt)
+        prompt_lbl.set_wrap(True)
+        prompt_lbl.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+        prompt_lbl.set_xalign(0)
+        prompt_lbl.set_selectable(True)
+        content.append(prompt_lbl)
+
+        # ── Negative prompt (only if set) ─────────────────────────────────────
+        if record.negative_prompt:
+            content.append(self._detail_section("Negative Prompt"))
+            neg_lbl = Gtk.Label(label=record.negative_prompt)
+            neg_lbl.set_wrap(True)
+            neg_lbl.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            neg_lbl.set_xalign(0)
+            neg_lbl.add_css_class("muted")
+            neg_lbl.set_selectable(True)
+            content.append(neg_lbl)
+
+        # ── Generation metadata grid ──────────────────────────────────────────
+        content.append(self._detail_section("Generation Info"))
+        info_grid = Gtk.Grid()
+        info_grid.set_column_spacing(12)
+        info_grid.set_row_spacing(3)
+
+        # Format date
+        try:
+            from datetime import datetime as _dt
+            dt = _dt.fromisoformat(record.created_at)
+            date_str = dt.strftime("%Y-%m-%d  %H:%M")
+        except Exception:
+            date_str = record.created_at or "—"
+
+        # File size
+        size_str = "—"
+        if record.video_exists:
+            try:
+                nb = Path(record.video_path).stat().st_size
+                size_str = f"{nb / 1_048_576:.1f} MB"
+            except OSError:
+                pass
+
+        seed_str = "random" if record.seed == -1 else str(record.seed)
+
+        rows = [
+            ("Date",         date_str),
+            ("Steps",        str(record.num_inference_steps)),
+            ("Seed",         seed_str),
+            ("Generated in", _fmt_duration(record.duration_s) if record.duration_s else "—"),
+            ("File",         Path(record.video_path).name),
+            ("Size",         size_str),
+            ("Job ID",       record.id),
+        ]
+        for i, (key, val) in enumerate(rows):
+            key_lbl = Gtk.Label(label=key)
+            key_lbl.set_xalign(1)
+            key_lbl.add_css_class("muted")
+            val_lbl = Gtk.Label(label=val)
+            val_lbl.set_xalign(0)
+            val_lbl.set_selectable(True)
+            val_lbl.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+            if key == "Job ID":
+                val_lbl.add_css_class("mono")
+            info_grid.attach(key_lbl, 0, i, 1, 1)
+            info_grid.attach(val_lbl, 1, i, 1, 1)
+        content.append(info_grid)
+
+        # ── Seed image ────────────────────────────────────────────────────────
+        if record.seed_image_path and Path(record.seed_image_path).exists():
+            content.append(self._detail_section("Seed Image"))
+            seed_img = _make_image_widget(record.seed_image_path, 96, 54)
+            seed_img.set_halign(Gtk.Align.START)
+            content.append(seed_img)
+
+        # ── Action buttons ────────────────────────────────────────────────────
+        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        sep.set_margin_top(8)
+        sep.set_margin_bottom(4)
+        content.append(sep)
+
+        action_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        export_btn = Gtk.Button(label="💾 Export")
+        export_btn.set_tooltip_text("Save a copy of this video")
+        export_btn.connect("clicked", self._export)
+        if not record.video_exists:
+            export_btn.set_sensitive(False)
+        action_row.append(export_btn)
+
+        iter_btn = Gtk.Button(label="↺ Iterate")
+        iter_btn.set_tooltip_text("Pre-fill the control panel with this prompt")
+        iter_btn.connect("clicked", self._iterate)
+        action_row.append(iter_btn)
+        content.append(action_row)
+
+        self.set_child(content)
+
+    # ── Helpers ───────────────────────────────────────────────────────────────
+
+    def _detail_section(self, text: str) -> Gtk.Label:
+        lbl = Gtk.Label(label=text.upper())
+        lbl.set_xalign(0)
+        lbl.add_css_class("detail-section")
+        return lbl
+
+    def _toggle_play(self, _btn) -> None:
+        if self._video_widget is None:
+            return
+        stream = self._video_widget.get_media_stream()
+        if stream is None:
+            return
+        if stream.get_playing():
+            stream.pause()
+            self._play_btn.set_label("▶ Play")
+        else:
+            stream.play()
+            self._play_btn.set_label("⏸ Pause")
+
+    def _open_fullscreen(self, _btn) -> None:
+        if self._record and self._record.video_exists:
+            win = VideoPlayerWindow(self._record, self.get_root())
+            win.present()
+
+    def _export(self, _btn) -> None:
+        if not self._record or not self._record.video_exists:
+            return
+        dlg = Gtk.FileDialog()
+        dlg.set_title("Export Video")
+        dlg.set_initial_name(Path(self._record.video_path).name)
+        dlg.save(self.get_root(), None, self._export_done)
+
+    def _export_done(self, dlg, result) -> None:
+        try:
+            gfile = dlg.save_finish(result)
+        except Exception:
+            return
+        dest = gfile.get_path()
+        if dest and self._record:
+            shutil.copy2(self._record.video_path, dest)
+            src_txt = Path(self._record.video_path).with_suffix(".txt")
+            if src_txt.exists():
+                shutil.copy2(src_txt, Path(dest).with_suffix(".txt"))
+
+    def _iterate(self, _btn) -> None:
+        if self._record and self._iterate_cb:
+            self._iterate_cb(
+                self._record.prompt,
+                self._record.negative_prompt,
+                self._record.seed_image_path,
+            )
 
 
 # ── Full-size video player window ─────────────────────────────────────────────
@@ -530,9 +785,10 @@ class PendingCard(Gtk.Frame):
 class GalleryWidget(Gtk.ScrolledWindow):
     """Scrollable grid of GenerationCards, newest first."""
 
-    def __init__(self, iterate_cb):
+    def __init__(self, iterate_cb, select_cb):
         super().__init__()
         self._iterate_cb = iterate_cb
+        self._select_cb = select_cb   # select_cb(record: GenerationRecord) called on click
         self.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self.set_hexpand(True)
         self.set_vexpand(True)
@@ -548,8 +804,17 @@ class GalleryWidget(Gtk.ScrolledWindow):
         self._grid.set_valign(Gtk.Align.START)
         self.set_child(self._grid)
 
-        self._cards: list = []          # all card widgets, index 0 = top-left
+        self._cards: list = []                       # all card widgets, index 0 = top-left
         self._pending: Optional[PendingCard] = None
+        self._selected_card: Optional[GenerationCard] = None
+
+    def select_card(self, card: "GenerationCard") -> None:
+        """Highlight card as selected and notify the detail panel."""
+        if self._selected_card is not None:
+            self._selected_card.set_selected(False)
+        self._selected_card = card
+        card.set_selected(True)
+        self._select_cb(card._record)
 
     def add_pending_card(self, prompt: str = "") -> PendingCard:
         card = PendingCard(prompt=prompt)
@@ -559,7 +824,7 @@ class GalleryWidget(Gtk.ScrolledWindow):
         return card
 
     def replace_pending_with(self, record: GenerationRecord) -> None:
-        card = GenerationCard(record, self._iterate_cb)
+        card = self._make_card(record)
         if self._pending and self._pending in self._cards:
             self._pending.stop_timer()
             idx = self._cards.index(self._pending)
@@ -568,6 +833,8 @@ class GalleryWidget(Gtk.ScrolledWindow):
             self._cards.insert(0, card)
         self._pending = None
         self._relayout()
+        # Auto-select the freshly completed card so the detail panel updates immediately
+        self.select_card(card)
 
     def remove_pending(self) -> None:
         if self._pending and self._pending in self._cards:
@@ -578,8 +845,15 @@ class GalleryWidget(Gtk.ScrolledWindow):
 
     def load_history(self, records) -> None:
         for record in records:
-            self._cards.append(GenerationCard(record, self._iterate_cb))
+            self._cards.append(self._make_card(record))
         self._relayout()
+
+    def _make_card(self, record: GenerationRecord) -> "GenerationCard":
+        return GenerationCard(
+            record,
+            iterate_cb=self._iterate_cb,
+            select_cb=self.select_card,
+        )
 
     def _relayout(self) -> None:
         # Remove all children from grid
@@ -994,7 +1268,7 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def __init__(self, app: Gtk.Application, server_url: str = "http://localhost:8000"):
         super().__init__(application=app, title="TT Video Generator")
-        self.set_default_size(1200, 750)
+        self.set_default_size(1400, 800)
 
         self._client = APIClient(server_url)
         self._store = HistoryStore()
@@ -1016,8 +1290,9 @@ class MainWindow(Gtk.ApplicationWindow):
             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION,
         )
 
-        paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
-        self.set_child(paned)
+        # Three-pane layout: controls | gallery | detail
+        outer_paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+        self.set_child(outer_paned)
 
         self._controls = ControlPanel(
             on_generate=self._on_generate,
@@ -1026,26 +1301,44 @@ class MainWindow(Gtk.ApplicationWindow):
             on_recover=self._on_recover,
         )
         self._controls.set_remove_queue_cb(self._on_queue_remove)
-        paned.set_start_child(self._controls)
-        paned.set_shrink_start_child(False)
-        paned.set_resize_start_child(False)
+        outer_paned.set_start_child(self._controls)
+        outer_paned.set_shrink_start_child(False)
+        outer_paned.set_resize_start_child(False)
+
+        # Inner paned splits gallery (left) from detail panel (right)
+        inner_paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL)
+        inner_paned.set_position(480)   # default gallery width before detail panel
 
         gallery_wrap = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self._gallery = GalleryWidget(iterate_cb=self._controls.populate_prompts)
+        self._gallery = GalleryWidget(
+            iterate_cb=self._controls.populate_prompts,
+            select_cb=self._on_card_selected,
+        )
         gallery_wrap.append(self._gallery)
 
-        # Status bar
+        # Status bar spans the full bottom of the gallery+detail area
         self._status_lbl = Gtk.Label(label="Ready")
         self._status_lbl.set_xalign(0)
         self._status_lbl.add_css_class("status-bar")
         gallery_wrap.append(self._status_lbl)
 
-        paned.set_end_child(gallery_wrap)
-        paned.set_shrink_end_child(False)
+        inner_paned.set_start_child(gallery_wrap)
+        inner_paned.set_shrink_start_child(False)
+
+        self._detail = DetailPanel()
+        inner_paned.set_end_child(self._detail)
+        inner_paned.set_shrink_end_child(False)
+
+        outer_paned.set_end_child(inner_paned)
+        outer_paned.set_shrink_end_child(False)
 
     def _set_status(self, text: str) -> None:
         """Update status bar. Safe to call from main thread only."""
         self._status_lbl.set_label(text)
+
+    def _on_card_selected(self, record: GenerationRecord) -> None:
+        """Called when the user clicks a gallery card. Populates the detail panel."""
+        self._detail.show_record(record, self._controls.populate_prompts)
 
     def _load_history(self) -> None:
         records = self._store.all_records()
