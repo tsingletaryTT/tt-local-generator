@@ -17,7 +17,7 @@ set -euo pipefail
 
 REPO_DIR="$HOME/code/tt-inference-server"
 HF_CACHE="$HOME/.cache/huggingface"
-DOCKER_IMAGE="ghcr.io/tenstorrent/tt-media-inference-server:0.12.0-555f240"
+DOCKER_IMAGE="ghcr.io/tenstorrent/tt-media-inference-server:0.11.1-bac8b34"
 MODEL="FLUX.1-dev"
 LOG_DIR="$REPO_DIR/workflow_logs/docker_server"
 
