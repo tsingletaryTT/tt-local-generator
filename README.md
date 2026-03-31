@@ -2,7 +2,7 @@
 
 A GTK4 desktop UI for generating videos with [Wan2.2-T2V-A14B-Diffusers](https://huggingface.co/Wan-AI/Wan2.2-T2V-A14B-Diffusers) via a local [tt-inference-server](https://github.com/tenstorrent/tt-inference-server) instance running on Tenstorrent hardware.
 
-![Gallery view with inline video playback, prompt queue, and generation cards](https://placeholder)
+![Gallery view with detail panel, hover-to-play thumbnails, and generation metadata](screenshot.png)
 
 ## Features
 
