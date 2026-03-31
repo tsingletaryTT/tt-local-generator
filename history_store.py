@@ -8,7 +8,8 @@ Stores metadata and file paths for every completed generation in:
     ~/.local/share/tt-video-gen/
         history.json     — list of GenerationRecord dicts, newest-last
         videos/          — downloaded MP4 files
-        thumbnails/      — first-frame JPEG thumbnails
+        images/          — generated JPEG images (FLUX)
+        thumbnails/      — first-frame JPEG thumbnails / image thumbnails
 """
 import json
 import uuid
@@ -21,24 +22,28 @@ from typing import List, Optional
 # Root storage directory
 STORAGE_DIR = Path.home() / ".local" / "share" / "tt-video-gen"
 VIDEOS_DIR = STORAGE_DIR / "videos"
+IMAGES_DIR = STORAGE_DIR / "images"
 THUMBNAILS_DIR = STORAGE_DIR / "thumbnails"
 HISTORY_FILE = STORAGE_DIR / "history.json"
 
 
 @dataclass
 class GenerationRecord:
-    """Metadata for a single completed video generation."""
+    """Metadata for a single completed generation (video or image)."""
 
-    id: str                             # Unique local ID (matches server job ID)
+    id: str                             # Unique local ID (matches server job ID for video)
     prompt: str                         # Generation prompt
     negative_prompt: str                # Negative prompt (empty string if none)
     num_inference_steps: int            # Steps used
     seed: int                           # Seed used (-1 = random/unknown)
-    video_path: str                     # Absolute path to the MP4 file
+    video_path: str                     # Absolute path to the MP4 file (empty for images)
     thumbnail_path: str                 # Absolute path to the thumbnail JPEG
     created_at: str                     # ISO 8601 timestamp
     duration_s: float = 0.0            # Wall-clock generation time in seconds
     seed_image_path: str = ""           # Optional reference/seed image (empty = none)
+    media_type: str = "video"           # "video" (Wan2.2) or "image" (FLUX)
+    image_path: str = ""               # Absolute path to the image file (empty for videos)
+    guidance_scale: float = 0.0        # Guidance scale used (image gen only)
 
     @classmethod
     def new(
@@ -51,7 +56,7 @@ class GenerationRecord:
         duration_s: float = 0.0,
         seed_image_path: str = "",
     ) -> "GenerationRecord":
-        """Create a new record with pre-computed storage paths."""
+        """Create a new video record with pre-computed storage paths."""
         ts = datetime.now()
         ts_str = ts.strftime("%Y%m%d_%H%M%S")
 
@@ -69,6 +74,40 @@ class GenerationRecord:
             created_at=ts.isoformat(),
             duration_s=duration_s,
             seed_image_path=seed_image_path,
+            media_type="video",
+        )
+
+    @classmethod
+    def new_image(
+        cls,
+        job_id: str,
+        prompt: str,
+        negative_prompt: str,
+        num_inference_steps: int,
+        seed: int,
+        duration_s: float = 0.0,
+        guidance_scale: float = 3.5,
+    ) -> "GenerationRecord":
+        """Create a new image record with pre-computed storage paths (FLUX)."""
+        ts = datetime.now()
+        ts_str = ts.strftime("%Y%m%d_%H%M%S")
+
+        image_path = str(IMAGES_DIR / f"{ts_str}_{job_id[:8]}.jpg")
+        thumbnail_path = str(THUMBNAILS_DIR / f"{ts_str}_{job_id[:8]}.jpg")
+
+        return cls(
+            id=job_id,
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            num_inference_steps=num_inference_steps,
+            seed=seed,
+            video_path="",
+            thumbnail_path=thumbnail_path,
+            created_at=ts.isoformat(),
+            duration_s=duration_s,
+            media_type="image",
+            image_path=image_path,
+            guidance_scale=guidance_scale,
         )
 
     @property
@@ -82,11 +121,25 @@ class GenerationRecord:
 
     @property
     def video_exists(self) -> bool:
-        return Path(self.video_path).exists()
+        return bool(self.video_path) and Path(self.video_path).exists()
+
+    @property
+    def image_exists(self) -> bool:
+        return bool(self.image_path) and Path(self.image_path).exists()
+
+    @property
+    def media_file_path(self) -> str:
+        """Primary media file path — image_path for image records, video_path for video."""
+        return self.image_path if self.media_type == "image" else self.video_path
+
+    @property
+    def media_exists(self) -> bool:
+        """True if the primary media file exists on disk."""
+        return bool(self.media_file_path) and Path(self.media_file_path).exists()
 
     @property
     def thumbnail_exists(self) -> bool:
-        return Path(self.thumbnail_path).exists()
+        return bool(self.thumbnail_path) and Path(self.thumbnail_path).exists()
 
 
 class HistoryStore:
@@ -100,6 +153,7 @@ class HistoryStore:
     def __init__(self):
         # Ensure storage directories exist
         VIDEOS_DIR.mkdir(parents=True, exist_ok=True)
+        IMAGES_DIR.mkdir(parents=True, exist_ok=True)
         THUMBNAILS_DIR.mkdir(parents=True, exist_ok=True)
 
         self._records: List[GenerationRecord] = []
@@ -111,9 +165,15 @@ class HistoryStore:
             return
         try:
             raw = json.loads(HISTORY_FILE.read_text())
-            # Tolerate older records that predate the seed_image_path field
+            # Tolerate older records missing newer fields (seed_image_path, media_type, etc.)
             self._records = [
-                GenerationRecord(**{**r, "seed_image_path": r.get("seed_image_path", "")})
+                GenerationRecord(**{
+                    **r,
+                    "seed_image_path": r.get("seed_image_path", ""),
+                    "media_type": r.get("media_type", "video"),
+                    "image_path": r.get("image_path", ""),
+                    "guidance_scale": r.get("guidance_scale", 0.0),
+                })
                 for r in raw
             ]
         except Exception:

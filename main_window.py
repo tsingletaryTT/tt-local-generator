@@ -34,7 +34,7 @@ from gi.repository import GdkPixbuf, GLib, Gtk, Pango
 
 from api_client import APIClient
 from history_store import GenerationRecord, HistoryStore
-from worker import GenerationWorker
+from worker import GenerationWorker, ImageGenerationWorker
 
 
 # ── Tenstorrent dark palette as GTK CSS ───────────────────────────────────────
@@ -189,6 +189,33 @@ scrollbar slider:hover {
     border-color: #4FD1C5;
     color: #E8F0F2;
 }
+.source-btn {
+    background-color: #1A3C47;
+    color: #607D8B;
+    border: 1px solid #2D5566;
+    border-radius: 0;
+    padding: 4px 10px;
+    font-size: 12px;
+}
+.source-btn:hover {
+    background-color: #2D5566;
+    color: #E8F0F2;
+}
+.source-btn-left {
+    border-radius: 4px 0 0 4px;
+}
+.source-btn-right {
+    border-radius: 0 4px 4px 0;
+}
+.source-btn-active {
+    background-color: #4FD1C5;
+    color: #0F2A35;
+    border-color: #4FD1C5;
+    font-weight: bold;
+}
+.source-btn-active:hover {
+    background-color: #81E6D9;
+}
 """
 
 # ── Prompt component chips ────────────────────────────────────────────────────
@@ -280,6 +307,8 @@ class _QueueItem:
     steps: int
     seed: int
     seed_image_path: str = ""
+    model_source: str = "video"     # "video" (Wan2.2) or "image" (FLUX)
+    guidance_scale: float = 3.5     # used when model_source == "image"
 
 
 # ── Generation card ────────────────────────────────────────────────────────────
@@ -305,7 +334,8 @@ class GenerationCard(Gtk.Frame):
         gesture.connect("pressed", lambda *_: self._select_cb(self))
         self.add_controller(gesture)
 
-        # Hovering over the card plays the video in the thumbnail area (if available).
+        # Hovering over a video card plays it in the thumbnail area.
+        # Image cards (FLUX) don't have a video to play, so no hover controller.
         if record.video_exists:
             motion = Gtk.EventControllerMotion()
             motion.connect("enter", self._on_hover_enter)
@@ -334,7 +364,8 @@ class GenerationCard(Gtk.Frame):
         if self._record.thumbnail_exists:
             thumb = _make_image_widget(self._record.thumbnail_path, _THUMB_W, _THUMB_H)
         else:
-            thumb = _make_image_widget("", _THUMB_W, _THUMB_H, "🎬")
+            placeholder = "🖼" if self._record.media_type == "image" else "🎬"
+            thumb = _make_image_widget("", _THUMB_W, _THUMB_H, placeholder)
         self._media_stack.add_named(thumb, "thumb")
 
         if self._record.video_exists:
@@ -376,12 +407,13 @@ class GenerationCard(Gtk.Frame):
         # Buttons: Save and Iterate (play/fullscreen are in the detail panel)
         btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         export_btn = Gtk.Button(label="💾 Save")
-        export_btn.set_tooltip_text("Export video to a chosen location")
+        tip = "Export image to a chosen location" if self._record.media_type == "image" else "Export video to a chosen location"
+        export_btn.set_tooltip_text(tip)
         export_btn.connect("clicked", self._export)
         iter_btn = Gtk.Button(label="↺ Iterate")
         iter_btn.set_tooltip_text("Re-use this prompt in the control panel")
         iter_btn.connect("clicked", self._iterate)
-        if not self._record.video_exists:
+        if not self._record.media_exists:
             export_btn.set_sensitive(False)
         btn_row.append(export_btn)
         btn_row.append(iter_btn)
@@ -400,11 +432,15 @@ class GenerationCard(Gtk.Frame):
             self._media_stack.set_visible_child_name("thumb")
 
     def _export(self, _btn) -> None:
-        if not self._record.video_exists:
+        if not self._record.media_exists:
             return
         dlg = Gtk.FileDialog()
-        dlg.set_title("Export Video")
-        dlg.set_initial_name("video_export.mp4")
+        if self._record.media_type == "image":
+            dlg.set_title("Export Image")
+            dlg.set_initial_name("image_export.jpg")
+        else:
+            dlg.set_title("Export Video")
+            dlg.set_initial_name("video_export.mp4")
         dlg.save(self.get_root(), None, self._export_done)
 
     def _export_done(self, dlg, result) -> None:
@@ -414,8 +450,9 @@ class GenerationCard(Gtk.Frame):
             return
         dest = gfile.get_path()
         if dest:
-            shutil.copy2(self._record.video_path, dest)
-            src_txt = Path(self._record.video_path).with_suffix(".txt")
+            src = self._record.media_file_path
+            shutil.copy2(src, dest)
+            src_txt = Path(src).with_suffix(".txt")
             if src_txt.exists():
                 shutil.copy2(src_txt, Path(dest).with_suffix(".txt"))
 
@@ -488,8 +525,28 @@ class DetailPanel(Gtk.ScrolledWindow):
         content.set_margin_start(12)
         content.set_margin_end(12)
 
-        # ── Video player ──────────────────────────────────────────────────────
-        if record.video_exists:
+        # ── Media area: video player or image viewer ──────────────────────────
+        if record.media_type == "image":
+            # FLUX image — show at full detail size with no playback controls
+            if record.image_exists:
+                img_widget = _make_image_widget(record.image_path, _DETAIL_VIDEO_W, _DETAIL_VIDEO_H, "🖼")
+            elif record.thumbnail_exists:
+                img_widget = _make_image_widget(record.thumbnail_path, _DETAIL_VIDEO_W, _DETAIL_VIDEO_H, "🖼")
+            else:
+                img_widget = _make_image_widget("", _DETAIL_VIDEO_W, _DETAIL_VIDEO_H, "🖼\n(image not found)")
+            img_widget.set_halign(Gtk.Align.START)
+            content.append(img_widget)
+            # Export action row for images (no play/fullscreen)
+            img_ctrl = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            open_full_btn = Gtk.Button(label="⛶ View Full")
+            open_full_btn.set_tooltip_text("Open image in a maximized window")
+            open_full_btn.connect("clicked", self._open_image_fullscreen)
+            if not record.image_exists:
+                open_full_btn.set_sensitive(False)
+            img_ctrl.append(open_full_btn)
+            content.append(img_ctrl)
+        elif record.video_exists:
+            # Wan2.2 video — inline player with play/pause + fullscreen
             self._video_widget = Gtk.Video.new_for_filename(record.video_path)
             self._video_widget.set_autoplay(False)
             self._video_widget.set_loop(True)
@@ -498,7 +555,6 @@ class DetailPanel(Gtk.ScrolledWindow):
             self._video_widget.set_halign(Gtk.Align.START)
             content.append(self._video_widget)
 
-            # Play/pause + fullscreen controls
             ctrl_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
             self._play_btn = Gtk.Button(label="▶ Play")
             self._play_btn.connect("clicked", self._toggle_play)
@@ -509,7 +565,7 @@ class DetailPanel(Gtk.ScrolledWindow):
             ctrl_row.append(full_btn)
             content.append(ctrl_row)
         else:
-            # No video file — show large thumbnail or placeholder
+            # Video file missing — show large thumbnail or placeholder
             if record.thumbnail_exists:
                 thumb = _make_image_widget(record.thumbnail_path, _DETAIL_VIDEO_W, _DETAIL_VIDEO_H)
             else:
@@ -552,21 +608,28 @@ class DetailPanel(Gtk.ScrolledWindow):
 
         # File size
         size_str = "—"
-        if record.video_exists:
+        media_path = record.media_file_path
+        if media_path and Path(media_path).exists():
             try:
-                nb = Path(record.video_path).stat().st_size
+                nb = Path(media_path).stat().st_size
                 size_str = f"{nb / 1_048_576:.1f} MB"
             except OSError:
                 pass
 
         seed_str = "random" if record.seed == -1 else str(record.seed)
+        file_name = Path(media_path).name if media_path else "—"
 
         rows = [
             ("Date",         date_str),
+            ("Type",         "Image (FLUX)" if record.media_type == "image" else "Video (Wan2.2)"),
             ("Steps",        str(record.num_inference_steps)),
+        ]
+        if record.media_type == "image" and record.guidance_scale:
+            rows.append(("Guidance",     f"{record.guidance_scale:.1f}"))
+        rows += [
             ("Seed",         seed_str),
             ("Generated in", _fmt_duration(record.duration_s) if record.duration_s else "—"),
-            ("File",         Path(record.video_path).name),
+            ("File",         file_name),
             ("Size",         size_str),
             ("Job ID",       record.id),
         ]
@@ -599,9 +662,10 @@ class DetailPanel(Gtk.ScrolledWindow):
 
         action_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         export_btn = Gtk.Button(label="💾 Export")
-        export_btn.set_tooltip_text("Save a copy of this video")
+        tip = "Save a copy of this image" if record.media_type == "image" else "Save a copy of this video"
+        export_btn.set_tooltip_text(tip)
         export_btn.connect("clicked", self._export)
-        if not record.video_exists:
+        if not record.media_exists:
             export_btn.set_sensitive(False)
         action_row.append(export_btn)
 
@@ -639,12 +703,21 @@ class DetailPanel(Gtk.ScrolledWindow):
             win = VideoPlayerWindow(self._record, self.get_root())
             win.present()
 
+    def _open_image_fullscreen(self, _btn) -> None:
+        if self._record and self._record.image_exists:
+            win = ImageViewerWindow(self._record, self.get_root())
+            win.present()
+
     def _export(self, _btn) -> None:
-        if not self._record or not self._record.video_exists:
+        if not self._record or not self._record.media_exists:
             return
         dlg = Gtk.FileDialog()
-        dlg.set_title("Export Video")
-        dlg.set_initial_name(Path(self._record.video_path).name)
+        media_path = self._record.media_file_path
+        if self._record.media_type == "image":
+            dlg.set_title("Export Image")
+        else:
+            dlg.set_title("Export Video")
+        dlg.set_initial_name(Path(media_path).name)
         dlg.save(self.get_root(), None, self._export_done)
 
     def _export_done(self, dlg, result) -> None:
@@ -654,8 +727,9 @@ class DetailPanel(Gtk.ScrolledWindow):
             return
         dest = gfile.get_path()
         if dest and self._record:
-            shutil.copy2(self._record.video_path, dest)
-            src_txt = Path(self._record.video_path).with_suffix(".txt")
+            src = self._record.media_file_path
+            shutil.copy2(src, dest)
+            src_txt = Path(src).with_suffix(".txt")
             if src_txt.exists():
                 shutil.copy2(src_txt, Path(dest).with_suffix(".txt"))
 
@@ -765,6 +839,90 @@ class VideoPlayerWindow(Gtk.Window):
         return False
 
 
+# ── Full-size image viewer window ─────────────────────────────────────────────
+
+class ImageViewerWindow(Gtk.Window):
+    """
+    Standalone window for viewing a generated FLUX image at full size.
+
+    Opens maximized by default. Supports:
+      - Escape / close button → closes window
+      - F → toggle fullscreen
+    """
+
+    def __init__(self, record: "GenerationRecord", parent_window: Gtk.Window):
+        super().__init__()
+        self.set_transient_for(parent_window)
+        self.set_modal(False)
+
+        short = record.prompt if len(record.prompt) <= 60 else record.prompt[:60] + "…"
+        self.set_title(short)
+        self.set_default_size(1280, 720)
+
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.set_child(outer)
+
+        # Image fills the window
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.AUTOMATIC, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_vexpand(True)
+        scroll.set_hexpand(True)
+        pb = _load_pixbuf(record.image_path, 1920, 1080)
+        if pb:
+            pic = Gtk.Picture.new_for_pixbuf(pb)
+            pic.set_can_shrink(True)
+            pic.set_vexpand(True)
+            pic.set_hexpand(True)
+            scroll.set_child(pic)
+        else:
+            lbl = Gtk.Label(label="🖼  Image not available")
+            lbl.set_vexpand(True)
+            scroll.set_child(lbl)
+        outer.append(scroll)
+
+        # Controls strip
+        ctrl = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        ctrl.set_margin_start(12)
+        ctrl.set_margin_end(12)
+        ctrl.set_margin_top(6)
+        ctrl.set_margin_bottom(6)
+        outer.append(ctrl)
+
+        fs_btn = Gtk.Button(label="⛶ Fullscreen")
+        fs_btn.set_tooltip_text("Toggle fullscreen (F)")
+        fs_btn.connect("clicked", lambda _: self._toggle_fullscreen())
+        ctrl.append(fs_btn)
+
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        ctrl.append(spacer)
+
+        close_btn = Gtk.Button(label="✕ Close")
+        close_btn.connect("clicked", lambda _: self.close())
+        ctrl.append(close_btn)
+
+        key_ctrl = Gtk.EventControllerKey()
+        key_ctrl.connect("key-pressed", self._on_key)
+        self.add_controller(key_ctrl)
+
+        self.maximize()
+
+    def _toggle_fullscreen(self) -> None:
+        if self.is_fullscreen():
+            self.unfullscreen()
+        else:
+            self.fullscreen()
+
+    def _on_key(self, _ctrl, keyval, _keycode, _state) -> bool:
+        if keyval == 0xFF1B:    # Escape
+            self.close()
+            return True
+        if keyval in (0x66, 0x46):   # f / F
+            self._toggle_fullscreen()
+            return True
+        return False
+
+
 # ── Pending card ───────────────────────────────────────────────────────────────
 
 class PendingCard(Gtk.Frame):
@@ -835,27 +993,65 @@ class PendingCard(Gtk.Frame):
 
 # ── Gallery ────────────────────────────────────────────────────────────────────
 
-class GalleryWidget(Gtk.ScrolledWindow):
-    """Scrollable grid of GenerationCards, newest first."""
+_GALLERY_AUTOPLAY_LIMIT = 12   # max cards whose videos are loaded at once during "play all"
+
+
+class GalleryWidget(Gtk.Box):
+    """
+    Scrollable grid of GenerationCards, newest first.
+
+    Contains a toolbar with a "▶ Play All" / "⏸ Pause All" button that starts or
+    stops looping all visible video thumbnails simultaneously.  When the number of
+    video cards exceeds _GALLERY_AUTOPLAY_LIMIT, only the top N are played to
+    avoid excessive GStreamer resource use.  Scrolling pauses cards that scroll
+    off the top and unpauses new ones that become visible (handled by
+    _sync_autoplay()).
+    """
 
     def __init__(self, iterate_cb, select_cb):
-        super().__init__()
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self.set_vexpand(True)
+        self.set_hexpand(True)
         self._iterate_cb = iterate_cb
         self._select_cb = select_cb   # select_cb(record: GenerationRecord) called on click
-        self.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
-        self.set_hexpand(True)
-        self.set_vexpand(True)
+        self._playing_all = False
+
+        # ── Toolbar ───────────────────────────────────────────────────────────
+        toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        toolbar.set_margin_start(12)
+        toolbar.set_margin_end(12)
+        toolbar.set_margin_top(6)
+        toolbar.set_margin_bottom(4)
+
+        self._play_all_btn = Gtk.Button(label="▶ Play All")
+        self._play_all_btn.set_tooltip_text(
+            "Loop all video thumbnails in the gallery (limited to top "
+            f"{_GALLERY_AUTOPLAY_LIMIT} to save resources)"
+        )
+        self._play_all_btn.connect("clicked", self._toggle_play_all)
+        toolbar.append(self._play_all_btn)
+        self.append(toolbar)
+
+        # ── Scrolled grid ─────────────────────────────────────────────────────
+        self._scroll = Gtk.ScrolledWindow()
+        self._scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        self._scroll.set_hexpand(True)
+        self._scroll.set_vexpand(True)
 
         self._grid = Gtk.Grid()
         self._grid.set_column_spacing(12)
         self._grid.set_row_spacing(12)
-        self._grid.set_margin_top(12)
+        self._grid.set_margin_top(4)
         self._grid.set_margin_bottom(12)
         self._grid.set_margin_start(12)
         self._grid.set_margin_end(12)
         self._grid.set_halign(Gtk.Align.START)
         self._grid.set_valign(Gtk.Align.START)
-        self.set_child(self._grid)
+        self._scroll.set_child(self._grid)
+        self.append(self._scroll)
+
+        # Connect scroll adjustment to sync autoplay on scroll
+        self._scroll.get_vadjustment().connect("value-changed", self._on_scroll_changed)
 
         self._cards: list = []                       # all card widgets, index 0 = top-left
         self._pending: Optional[PendingCard] = None
@@ -868,6 +1064,83 @@ class GalleryWidget(Gtk.ScrolledWindow):
         self._selected_card = card
         card.set_selected(True)
         self._select_cb(card._record)
+
+    # ── Play all / pause all ──────────────────────────────────────────────────
+
+    def _video_cards(self) -> list:
+        """Return GenerationCards whose video file exists (skips pending and image cards)."""
+        return [c for c in self._cards
+                if isinstance(c, GenerationCard) and c._record.video_exists]
+
+    def _toggle_play_all(self, _btn=None) -> None:
+        """Start or stop looping all video thumbnails in the gallery."""
+        self._playing_all = not self._playing_all
+        if self._playing_all:
+            self._play_all_btn.set_label("⏸ Pause All")
+            self._sync_autoplay()
+        else:
+            self._play_all_btn.set_label("▶ Play All")
+            # Stop all currently playing thumbnail videos
+            for card in self._video_cards():
+                if card._hover_video is not None:
+                    try:
+                        card._hover_video.get_media_stream().pause()
+                        card._media_stack.set_visible_child_name("thumb")
+                    except Exception:
+                        pass
+
+    def _sync_autoplay(self) -> None:
+        """
+        Play the top-N video cards that are visible in the viewport; pause the rest.
+        Called when play-all is active and the scroll position changes.
+        """
+        if not self._playing_all:
+            return
+
+        video_cards = self._video_cards()
+        # Determine which cards are "visible" by checking their position relative
+        # to the scrolled window viewport.  GTK4 doesn't expose exact card
+        # coordinates easily without allocation, so we use index order as a
+        # proxy: top-N by index position are treated as "in view".
+        adj = self._scroll.get_vadjustment()
+        scroll_top = adj.get_value()
+        scroll_bottom = scroll_top + adj.get_page_size()
+
+        # Estimate card height (thumbnail + padding + labels + buttons ≈ 220px)
+        _CARD_H_EST = 220
+        _CARD_W_EST = _THUMB_W + 32   # card width with margins
+        cards_per_row = _GALLERY_COLS
+
+        playing_count = 0
+        for i, card in enumerate(self._video_cards()):
+            row = i // cards_per_row
+            card_top = row * (_CARD_H_EST + 12)   # row * (card_height + row_spacing)
+            card_bottom = card_top + _CARD_H_EST
+            is_visible = card_bottom > scroll_top and card_top < scroll_bottom
+            should_play = is_visible and playing_count < _GALLERY_AUTOPLAY_LIMIT
+
+            if card._hover_video is None:
+                continue
+            stream = card._hover_video.get_media_stream()
+            if stream is None:
+                continue
+            try:
+                if should_play:
+                    playing_count += 1
+                    card._media_stack.set_visible_child_name("video")
+                    if not stream.get_playing():
+                        stream.play()
+                else:
+                    if stream.get_playing():
+                        stream.pause()
+                    card._media_stack.set_visible_child_name("thumb")
+            except Exception:
+                pass
+
+    def _on_scroll_changed(self, _adj) -> None:
+        """Pause/play cards as user scrolls when play-all is active."""
+        if self._playing_all:
+            self._sync_autoplay()
 
     def add_pending_card(self, prompt: str = "") -> PendingCard:
         card = PendingCard(prompt=prompt)
@@ -931,7 +1204,7 @@ class ControlPanel(Gtk.Box):
 
     def __init__(
         self,
-        on_generate,      # (prompt, neg, steps, seed, seed_image_path) -> None
+        on_generate,      # (prompt, neg, steps, seed, seed_image_path, model_source, guidance_scale) -> None
         on_enqueue,       # same signature
         on_cancel,        # () -> None
         on_recover,       # () -> None
@@ -944,6 +1217,7 @@ class ControlPanel(Gtk.Box):
         self._seed_image_path = ""
         self._server_ready = False
         self._busy = False
+        self._model_source = "video"   # "video" or "image"
         self.set_margin_top(12)
         self.set_margin_bottom(12)
         self.set_margin_start(12)
@@ -958,14 +1232,31 @@ class ControlPanel(Gtk.Box):
         return lbl
 
     def _build(self) -> None:
-        title = Gtk.Label(label="TT VIDEO GENERATOR")
-        title.set_xalign(0)
-        title.add_css_class("teal")
+        self._title_lbl = Gtk.Label(label="TT VIDEO GENERATOR")
+        self._title_lbl.set_xalign(0)
+        self._title_lbl.add_css_class("teal")
         attrs = Pango.AttrList()
         attrs.insert(Pango.AttrFontDesc.new(
             Pango.FontDescription.from_string("sans bold 15")))
-        title.set_attributes(attrs)
-        self.append(title)
+        self._title_lbl.set_attributes(attrs)
+        self.append(self._title_lbl)
+
+        # ── Model source toggle ───────────────────────────────────────────────
+        # Switches between Wan2.2 (video) and FLUX.1-dev (image) generation.
+        self.append(self._section("Generation Source"))
+        src_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        self._src_video_btn = Gtk.Button(label="🎬 Wan2.2 Video")
+        self._src_video_btn.add_css_class("source-btn")
+        self._src_video_btn.add_css_class("source-btn-left")
+        self._src_video_btn.add_css_class("source-btn-active")
+        self._src_video_btn.connect("clicked", lambda _: self._set_source("video"))
+        src_row.append(self._src_video_btn)
+        self._src_image_btn = Gtk.Button(label="🖼 FLUX Image")
+        self._src_image_btn.add_css_class("source-btn")
+        self._src_image_btn.add_css_class("source-btn-right")
+        self._src_image_btn.connect("clicked", lambda _: self._set_source("image"))
+        src_row.append(self._src_image_btn)
+        self.append(src_row)
 
         # ── Prompt ────────────────────────────────────────────────────────────
         self.append(self._section("Prompt"))
@@ -1025,7 +1316,8 @@ class ControlPanel(Gtk.Box):
         param_grid.set_column_spacing(8)
         param_grid.set_row_spacing(4)
 
-        param_grid.attach(Gtk.Label(label="Steps (12–50):"), 0, 0, 1, 1)
+        self._steps_lbl = Gtk.Label(label="Steps (12–50):")
+        param_grid.attach(self._steps_lbl, 0, 0, 1, 1)
         self._steps_spin = Gtk.SpinButton()
         self._steps_spin.set_adjustment(Gtk.Adjustment(value=20, lower=12, upper=50, step_increment=1))
         self._steps_spin.set_tooltip_text("More steps = better quality but slower.")
@@ -1036,10 +1328,34 @@ class ControlPanel(Gtk.Box):
         self._seed_spin.set_adjustment(Gtk.Adjustment(value=-1, lower=-1, upper=2**31-1, step_increment=1))
         self._seed_spin.set_tooltip_text("−1 uses a random seed each time.")
         param_grid.attach(self._seed_spin, 1, 1, 1, 1)
+
+        # Guidance scale — shown for FLUX (image), hidden for Wan2.2 (video)
+        self._guidance_lbl = Gtk.Label(label="Guidance (1–20):")
+        self._guidance_lbl.set_tooltip_text(
+            "Classifier-free guidance scale. Higher = closer to prompt, less creative.\n"
+            "Typical FLUX range: 2.5–7.0 (default 3.5)"
+        )
+        param_grid.attach(self._guidance_lbl, 0, 2, 1, 1)
+        self._guidance_spin = Gtk.SpinButton()
+        self._guidance_spin.set_adjustment(
+            Gtk.Adjustment(value=3.5, lower=1.0, upper=20.0, step_increment=0.5)
+        )
+        self._guidance_spin.set_digits(1)
+        self._guidance_spin.set_tooltip_text(
+            "FLUX guidance scale (1.0–20.0). Default 3.5. Higher values follow "
+            "the prompt more strictly but reduce variety."
+        )
+        param_grid.attach(self._guidance_spin, 1, 2, 1, 1)
+        # Hidden by default (Wan2.2 doesn't use guidance scale)
+        self._guidance_lbl.set_visible(False)
+        self._guidance_spin.set_visible(False)
+
         self.append(param_grid)
 
         # ── Seed image ────────────────────────────────────────────────────────
-        self.append(self._section("Seed Image (optional)"))
+        # Only relevant for Wan2.2 video; hidden when FLUX image source is selected.
+        self._seed_img_section = self._section("Seed Image (optional)")
+        self.append(self._seed_img_section)
         seed_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
 
         self._seed_img_widget = Gtk.Label(label="none")
@@ -1057,6 +1373,7 @@ class ControlPanel(Gtk.Box):
         self._clear_seed_btn.connect("clicked", lambda _: self._clear_seed_image())
         seed_btns.append(self._clear_seed_btn)
         seed_row.append(seed_btns)
+        self._seed_row_widget = seed_row
         self.append(seed_row)
 
         # ── Server status ──────────────────────────────────────────────────────
@@ -1100,6 +1417,50 @@ class ControlPanel(Gtk.Box):
         self.append(self._queue_box)
 
     # ── State ──────────────────────────────────────────────────────────────────
+
+    # ── Source toggle ──────────────────────────────────────────────────────────
+
+    def _set_source(self, source: str) -> None:
+        """Switch between 'video' (Wan2.2) and 'image' (FLUX) generation sources."""
+        if source == self._model_source:
+            return
+        self._model_source = source
+        is_image = source == "image"
+
+        # Update toggle button visual state
+        if is_image:
+            self._src_image_btn.add_css_class("source-btn-active")
+            self._src_video_btn.remove_css_class("source-btn-active")
+            self._title_lbl.set_label("TT IMAGE GENERATOR")
+        else:
+            self._src_video_btn.add_css_class("source-btn-active")
+            self._src_image_btn.remove_css_class("source-btn-active")
+            self._title_lbl.set_label("TT VIDEO GENERATOR")
+
+        # Show guidance scale for FLUX, hide for Wan2.2
+        self._guidance_lbl.set_visible(is_image)
+        self._guidance_spin.set_visible(is_image)
+
+        # Hide seed image section for FLUX (text-to-image, no init image)
+        self._seed_img_section.set_visible(not is_image)
+        self._seed_row_widget.set_visible(not is_image)
+
+        # Adjust steps range: FLUX min is 4, Wan2.2 min is 12
+        if is_image:
+            self._steps_lbl.set_label("Steps (4–50):")
+            adj = self._steps_spin.get_adjustment()
+            adj.set_lower(4)
+            if adj.get_value() < 4:
+                adj.set_value(4)
+        else:
+            self._steps_lbl.set_label("Steps (12–50):")
+            adj = self._steps_spin.get_adjustment()
+            adj.set_lower(12)
+            if adj.get_value() < 12:
+                adj.set_value(12)
+
+    def get_model_source(self) -> str:
+        return self._model_source
 
     def set_server_ready(self, ready: bool) -> None:
         self._server_ready = ready
@@ -1227,10 +1588,15 @@ class ControlPanel(Gtk.Box):
         prompt = self._get_prompt()
         if not prompt:
             return
-        args = (prompt, self._get_neg(),
-                int(self._steps_spin.get_value()),
-                int(self._seed_spin.get_value()),
-                self._seed_image_path)
+        args = (
+            prompt,
+            self._get_neg(),
+            int(self._steps_spin.get_value()),
+            int(self._seed_spin.get_value()),
+            self._seed_image_path,
+            self._model_source,
+            float(self._guidance_spin.get_value()),
+        )
         if self._busy:
             self._on_enqueue(*args)
         else:
@@ -1459,29 +1825,40 @@ class MainWindow(Gtk.ApplicationWindow):
 
     # ── Generation ─────────────────────────────────────────────────────────────
 
-    def _on_generate(self, prompt, neg, steps, seed, seed_image_path="") -> None:
+    def _on_generate(self, prompt, neg, steps, seed, seed_image_path="",
+                     model_source="video", guidance_scale=3.5) -> None:
         if self._worker and self._worker.is_alive():
             return
 
         pending = self._gallery.add_pending_card(prompt=prompt)
         self._controls.set_busy(True)
         self._controls.clear_prompt()
-        self._set_status("Submitting generation job…")
 
-        gen = GenerationWorker(
-            client=self._client,
-            store=self._store,
-            prompt=prompt,
-            negative_prompt=neg,
-            num_inference_steps=steps,
-            seed=seed,
-            seed_image_path=seed_image_path,
-        )
+        if model_source == "image":
+            self._set_status("Generating image with FLUX.1-dev…")
+            gen = ImageGenerationWorker(
+                client=self._client,
+                store=self._store,
+                prompt=prompt,
+                negative_prompt=neg,
+                num_inference_steps=steps,
+                seed=seed,
+                guidance_scale=guidance_scale,
+            )
+        else:
+            self._set_status("Submitting video generation job…")
+            gen = GenerationWorker(
+                client=self._client,
+                store=self._store,
+                prompt=prompt,
+                negative_prompt=neg,
+                num_inference_steps=steps,
+                seed=seed,
+                seed_image_path=seed_image_path,
+            )
         self._worker_gen = gen
 
         def run():
-            # Runs on worker thread — communicates back via GLib.idle_add.
-            gen.progress = lambda msg: GLib.idle_add(self._on_progress, msg, pending)
             gen.run_with_callbacks(
                 on_progress=lambda msg: GLib.idle_add(self._on_progress, msg, pending),
                 on_finished=lambda rec: GLib.idle_add(self._on_finished, rec),
@@ -1498,8 +1875,10 @@ class MainWindow(Gtk.ApplicationWindow):
 
     # ── Queue ──────────────────────────────────────────────────────────────────
 
-    def _on_enqueue(self, prompt, neg, steps, seed, seed_image_path) -> None:
-        self._queue.append(_QueueItem(prompt, neg, steps, seed, seed_image_path))
+    def _on_enqueue(self, prompt, neg, steps, seed, seed_image_path,
+                    model_source="video", guidance_scale=3.5) -> None:
+        self._queue.append(_QueueItem(prompt, neg, steps, seed, seed_image_path,
+                                      model_source, guidance_scale))
         self._controls.update_queue_display(self._queue)
         self._controls.clear_prompt()   # ready for the next prompt immediately
         n = len(self._queue)
@@ -1521,7 +1900,8 @@ class MainWindow(Gtk.ApplicationWindow):
         suffix = f" — {remaining} more queued" if remaining else ""
         self._set_status(f"Auto-starting next queued prompt{suffix}…")
         self._on_generate(item.prompt, item.negative_prompt,
-                          item.steps, item.seed, item.seed_image_path)
+                          item.steps, item.seed, item.seed_image_path,
+                          item.model_source, item.guidance_scale)
         return True
 
     # ── Recovery ───────────────────────────────────────────────────────────────
@@ -1607,7 +1987,8 @@ class MainWindow(Gtk.ApplicationWindow):
     def _on_finished(self, record: GenerationRecord) -> bool:
         self._gallery.replace_pending_with(record)
         self._controls.set_busy(False)
-        self._set_status(f"Done — {record.video_path}  ({record.duration_s:.0f}s)")
+        media_path = record.media_file_path
+        self._set_status(f"Done — {media_path}  ({record.duration_s:.0f}s)")
         self._start_next_queued()
         return False
 

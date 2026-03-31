@@ -4,14 +4,20 @@
 """
 API client for the tt-inference-server media server.
 
-The video generation API is async/job-based:
+Supports two generation modes:
+
+Video (Wan2.2-T2V) — async/job-based:
   1. POST /v1/videos/generations  → 202 {"id": "uuid", "status": "queued", ...}
   2. GET  /v1/videos/generations/{job_id}  → poll until status == "completed"/"failed"
   3. GET  /v1/videos/generations/{job_id}/download  → raw MP4 bytes
 
-Auth: the server may require an API key. We read it from the server's .env file
-(AUTHORIZATION_TOKEN) if present, otherwise proceed without auth.
+Image (FLUX.1-dev) — synchronous:
+  1. POST /v1/images/generations  → {"images": [base64_encoded_jpeg]}
+
+Auth: reads AUTHORIZATION_TOKEN (or API_KEY) from ~/code/tt-inference-server/.env.
+Falls back to the server's compiled-in default when the key is not found.
 """
+import base64
 import os
 from pathlib import Path
 from typing import Optional, Tuple
@@ -237,3 +243,62 @@ class APIClient:
         with dest_path.open("wb") as f:
             for chunk in resp.iter_content(chunk_size=65536):
                 f.write(chunk)
+
+    # ── Image generation (FLUX.1-dev) — synchronous ───────────────────────────
+
+    def generate_image(
+        self,
+        prompt: str,
+        negative_prompt: Optional[str] = None,
+        num_inference_steps: int = 20,
+        seed: Optional[int] = None,
+        guidance_scale: float = 3.5,
+        image_return_format: str = "JPEG",
+    ) -> bytes:
+        """
+        Generate an image synchronously via the FLUX.1-dev image API.
+
+        This call blocks until the image is ready (typically 15–90 seconds).
+        The server returns the image inline as a base64-encoded string.
+
+        Args:
+            prompt: Text description of the image to generate.
+            negative_prompt: Optional text describing what to avoid.
+            num_inference_steps: Denoising steps, 4–50 (FLUX min is 4).
+            seed: Random seed for reproducibility. None means random.
+            guidance_scale: Classifier-free guidance strength, 1.0–20.0.
+                            FLUX default is ~3.5; higher = more prompt adherence.
+            image_return_format: "JPEG" or "PNG".
+
+        Returns:
+            Raw image bytes decoded from the server's base64 response.
+
+        Raises:
+            requests.HTTPError: On 4xx/5xx responses.
+            ValueError: If the response contains no image data.
+        """
+        payload: dict = {
+            "prompt": prompt,
+            "guidance_scale": guidance_scale,
+            "num_inference_steps": max(4, min(50, num_inference_steps)),
+            "image_return_format": image_return_format,
+        }
+        if negative_prompt:
+            payload["negative_prompt"] = negative_prompt
+        if seed is not None and seed >= 0:
+            payload["seed"] = seed
+
+        resp = requests.post(
+            f"{self.base_url}/v1/images/generations",
+            json=payload,
+            headers=self._headers(),
+            timeout=300,   # FLUX generation can take up to ~90 s; 300 s is safe
+        )
+        resp.raise_for_status()
+
+        data = resp.json()
+        images = data.get("images")
+        if not images or not images[0]:
+            raise ValueError(f"Server returned no image data: {data}")
+
+        return base64.b64decode(images[0])
