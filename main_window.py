@@ -246,6 +246,58 @@ scrollbar slider:hover {
 .source-btn-active:hover {
     background-color: #81E6D9;
 }
+.server-start-btn {
+    background-color: #1A3C47;
+    color: #4FD1C5;
+    border: 1px solid #4FD1C5;
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 12px;
+}
+.server-start-btn:hover {
+    background-color: #2D5566;
+}
+.server-start-btn:disabled {
+    color: #607D8B;
+    border-color: #2D5566;
+}
+.server-stop-btn {
+    background-color: #2D1A1A;
+    color: #FF6B6B;
+    border: 1px solid #FF6B6B;
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 12px;
+}
+.server-stop-btn:hover {
+    background-color: #FF6B6B;
+    color: #0F2A35;
+}
+.server-stop-btn:disabled {
+    color: #607D8B;
+    border-color: #2D5566;
+    background-color: #1A3C47;
+}
+.trash-btn {
+    background-color: transparent;
+    color: #607D8B;
+    border: none;
+    border-radius: 4px;
+    padding: 2px 5px;
+    font-size: 12px;
+    min-width: 0;
+}
+.trash-btn:hover {
+    background-color: #2D1A1A;
+    color: #FF6B6B;
+}
+.server-log {
+    font-family: monospace;
+    font-size: 10px;
+    color: #81E6D9;
+    background-color: #0A1F28;
+    padding: 4px;
+}
 """
 
 # ── Prompt component chips ────────────────────────────────────────────────────
@@ -318,7 +370,6 @@ _IMAGE_PROMPT_CHIPS = [
 
 _THUMB_W = 200
 _THUMB_H = 112   # 16:9
-_GALLERY_COLS = 2
 _DETAIL_VIDEO_W = 480
 _DETAIL_VIDEO_H = 270
 
@@ -356,6 +407,31 @@ def _make_image_widget(path: str, width: int, height: int, placeholder: str = "�
     return lbl
 
 
+def _make_scalable_thumb(path: str, min_width: int, min_height: int,
+                         placeholder: str = "🎬") -> Gtk.Widget:
+    """
+    Load an image for gallery-card thumbnail display.  Unlike _make_image_widget
+    (which pre-scales to exact pixel dimensions), this version loads at the file's
+    native resolution and marks the Picture as expandable, so it fills the width
+    that the FlowBox cell allocates rather than being stuck at a fixed pixel size.
+
+    can_shrink=True  — widget may be allocated less than the image's natural size
+    hexpand=True     — widget fills the full horizontal cell width
+    size_request     — provides a hard minimum so cards never become too tiny
+    """
+    if path and Path(path).exists():
+        pic = Gtk.Picture.new_for_filename(path)
+        pic.set_can_shrink(True)
+        pic.set_hexpand(True)
+        pic.set_size_request(min_width, min_height)
+        return pic
+    lbl = Gtk.Label(label=placeholder)
+    lbl.set_size_request(min_width, min_height)
+    lbl.set_hexpand(True)
+    lbl.add_css_class("muted")
+    return lbl
+
+
 # ── Queue item ─────────────────────────────────────────────────────────────────
 
 @dataclass
@@ -374,17 +450,23 @@ class _QueueItem:
 class GenerationCard(Gtk.Frame):
     """
     Thumbnail card in the gallery. Click anywhere on the card to select it and
-    show full details in the DetailPanel. Buttons: 💾 Save, ↺ Iterate.
+    show full details in the DetailPanel.
+    Buttons: 💾 Save, ↺ Iterate, 🗑 Delete.
     select_cb(self) is called when the card is clicked.
+    delete_cb(record) is called when the trash button is clicked.
     """
 
-    def __init__(self, record: GenerationRecord, iterate_cb, select_cb):
+    def __init__(self, record: GenerationRecord, iterate_cb, select_cb, delete_cb):
         super().__init__()
         self._record = record
         self._iterate_cb = iterate_cb
         self._select_cb = select_cb
+        self._delete_cb = delete_cb
         self.add_css_class("card")
+        # Minimum card width; FlowBox homogeneous layout makes all cells equal width
+        # and expands them to fill the row, so actual width adapts to the pane size.
         self.set_size_request(_THUMB_W + 20, -1)
+        self.set_hexpand(True)
         self._build()
 
         # Clicking anywhere on the card selects it in the detail panel.
@@ -419,25 +501,34 @@ class GenerationCard(Gtk.Frame):
         self.set_child(box)
 
         # Media area: thumbnail normally; hover swaps in a silent looping video preview.
+        # The stack expands horizontally so the thumbnail fills the FlowBox cell width.
         self._media_stack = Gtk.Stack()
         self._media_stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
         self._media_stack.set_transition_duration(120)
+        self._media_stack.set_hexpand(True)
 
-        if self._record.thumbnail_exists:
-            thumb = _make_image_widget(self._record.thumbnail_path, _THUMB_W, _THUMB_H)
-        else:
-            placeholder = "🖼" if self._record.media_type == "image" else "🎬"
-            thumb = _make_image_widget("", _THUMB_W, _THUMB_H, placeholder)
+        # Use _make_scalable_thumb so the thumbnail grows with the card width
+        # instead of being clamped to the fixed _THUMB_W pixel value.
+        placeholder = "🖼" if self._record.media_type == "image" else "🎬"
+        thumb = _make_scalable_thumb(
+            self._record.thumbnail_path if self._record.thumbnail_exists else "",
+            _THUMB_W, _THUMB_H, placeholder,
+        )
         self._media_stack.add_named(thumb, "thumb")
 
         if self._record.video_exists:
             self._hover_video = Gtk.Video.new_for_filename(self._record.video_path)
             self._hover_video.set_autoplay(False)
             self._hover_video.set_loop(True)
+            self._hover_video.set_hexpand(True)
             self._hover_video.set_size_request(_THUMB_W, _THUMB_H)
             self._media_stack.add_named(self._hover_video, "video")
         else:
             self._hover_video = None
+        # Tracks whether we've wired notify::ended on the media stream for manual
+        # looping.  The stream is created lazily by GStreamer (it's None until the
+        # Video widget is first realized), so we connect on first play attempt.
+        self._loop_connected = False
 
         box.append(self._media_stack)
 
@@ -470,13 +561,14 @@ class GenerationCard(Gtk.Frame):
         dur_lbl = Gtk.Label(label=dur_text)
         dur_lbl.add_css_class("muted")
         meta.append(time_lbl)
-        spacer = Gtk.Box()
-        spacer.set_hexpand(True)
-        meta.append(spacer)
+        meta_spacer = Gtk.Box()
+        meta_spacer.set_hexpand(True)
+        meta.append(meta_spacer)
         meta.append(dur_lbl)
         box.append(meta)
 
-        # Buttons: Save and Iterate (play/fullscreen are in the detail panel)
+        # Buttons: Save, Iterate, and Trash (play/fullscreen are in the detail panel).
+        # Trash is right-aligned to keep it visually separated from the safe actions.
         btn_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
         export_btn = Gtk.Button(label="💾 Save")
         tip = "Export image to a chosen location" if self._record.media_type == "image" else "Export video to a chosen location"
@@ -489,19 +581,62 @@ class GenerationCard(Gtk.Frame):
             export_btn.set_sensitive(False)
         btn_row.append(export_btn)
         btn_row.append(iter_btn)
+
+        btn_spacer = Gtk.Box()
+        btn_spacer.set_hexpand(True)
+        btn_row.append(btn_spacer)
+
+        trash_btn = Gtk.Button(label="🗑")
+        trash_btn.add_css_class("trash-btn")
+        trash_btn.set_tooltip_text("Delete this generation from history and disk (irreversible)")
+        # Stop click event from bubbling up to the card's GestureClick (which would
+        # select the card while it's being deleted).
+        trash_btn.connect("clicked", self._on_trash_clicked)
+        btn_row.append(trash_btn)
+
         box.append(btn_row)
 
     def _on_hover_enter(self, _ctrl, _x, _y) -> None:
         """Start looping the video silently when the mouse enters the card."""
-        if self._hover_video is not None:
-            self._media_stack.set_visible_child_name("video")
-            self._hover_video.get_media_stream().play()
+        if self._hover_video is None:
+            return
+        self._media_stack.set_visible_child_name("video")
+        self._play_hover_stream()
+
+    def _play_hover_stream(self) -> None:
+        """
+        Play the hover video stream, wiring up the manual loop handler the first
+        time.  Gtk.Video creates its GStreamer pipeline lazily — get_media_stream()
+        returns None until the widget has been realized, so we guard here and let
+        the caller retry if needed.
+        """
+        if self._hover_video is None:
+            return
+        stream = self._hover_video.get_media_stream()
+        if stream is None:
+            # Stream not yet initialised — try again after the widget settles.
+            GLib.timeout_add(100, self._play_hover_stream)
+            return
+        if not self._loop_connected:
+            stream.connect("notify::ended", self._on_stream_ended)
+            self._loop_connected = True
+        if not stream.get_playing():
+            stream.play()
+
+    def _on_stream_ended(self, stream, _param) -> None:
+        """Seek back to the start and keep playing for seamless in-card looping."""
+        if stream.get_ended() and self._media_stack.get_visible_child_name() == "video":
+            stream.seek(0)
+            GLib.idle_add(stream.play)
 
     def _on_hover_leave(self, _ctrl) -> None:
         """Stop the video and revert to the thumbnail when the mouse leaves."""
-        if self._hover_video is not None:
-            self._hover_video.get_media_stream().pause()
-            self._media_stack.set_visible_child_name("thumb")
+        if self._hover_video is None:
+            return
+        stream = self._hover_video.get_media_stream()
+        if stream is not None:
+            stream.pause()
+        self._media_stack.set_visible_child_name("thumb")
 
     def _export(self, _btn) -> None:
         if not self._record.media_exists:
@@ -534,6 +669,13 @@ class GenerationCard(Gtk.Frame):
             self._record.negative_prompt,
             self._record.seed_image_path,
         )
+
+    def _on_trash_clicked(self, btn) -> None:
+        """Propagate the delete request upward; prevent the click from selecting the card."""
+        # Stop propagation so the card's GestureClick (which selects the card) does
+        # not fire for the same click that requested a deletion.
+        btn.set_sensitive(False)  # immediate visual feedback; card is about to be removed
+        self._delete_cb(self._record)
 
 
 # ── Duration formatting helper ────────────────────────────────────────────────
@@ -577,6 +719,17 @@ class DetailPanel(Gtk.ScrolledWindow):
         lbl.set_halign(Gtk.Align.CENTER)
         box.append(lbl)
         self.set_child(box)
+
+    def clear(self) -> None:
+        """Revert the panel to its empty placeholder state (e.g. after the shown record is deleted)."""
+        self._record = None
+        if self._video_widget is not None:
+            stream = self._video_widget.get_media_stream()
+            if stream and stream.get_playing():
+                stream.pause()
+        self._video_widget = None
+        self._play_btn = None
+        self._show_empty()
 
     def show_record(self, record: GenerationRecord, iterate_cb) -> None:
         """Populate the panel with a completed generation record."""
@@ -1004,6 +1157,7 @@ class PendingCard(Gtk.Frame):
         super().__init__()
         self.add_css_class("card")
         self.set_size_request(_THUMB_W + 20, -1)
+        self.set_hexpand(True)
         self._start = time.monotonic()
         self._timer_id: Optional[int] = None
 
@@ -1077,6 +1231,9 @@ class GalleryWidget(Gtk.Box):
     """
     Scrollable grid of GenerationCards, newest first.
 
+    Uses Gtk.FlowBox so the number of columns adjusts automatically as the pane
+    is resized — no fixed column count.  Cards expand to fill the row.
+
     Contains a toolbar with a "▶ Play All" / "⏸ Pause All" button that starts or
     stops looping all visible video thumbnails simultaneously.  When the number of
     video cards exceeds _GALLERY_AUTOPLAY_LIMIT, only the top N are played to
@@ -1085,12 +1242,13 @@ class GalleryWidget(Gtk.Box):
     _sync_autoplay()).
     """
 
-    def __init__(self, iterate_cb, select_cb):
+    def __init__(self, iterate_cb, select_cb, delete_cb, media_type: str = "video"):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.set_vexpand(True)
         self.set_hexpand(True)
         self._iterate_cb = iterate_cb
         self._select_cb = select_cb   # select_cb(record: GenerationRecord) called on click
+        self._delete_cb = delete_cb   # delete_cb(record: GenerationRecord) called on trash
         self._playing_all = False
 
         # ── Toolbar ───────────────────────────────────────────────────────────
@@ -1106,29 +1264,43 @@ class GalleryWidget(Gtk.Box):
             f"{_GALLERY_AUTOPLAY_LIMIT} to save resources)"
         )
         self._play_all_btn.connect("clicked", self._toggle_play_all)
+        # Image-only gallery has no videos to play; hide the button entirely.
+        self._play_all_btn.set_visible(media_type != "image")
         toolbar.append(self._play_all_btn)
         self.append(toolbar)
 
-        # ── Scrolled grid ─────────────────────────────────────────────────────
+        # ── Scrolled flow box ──────────────────────────────────────────────────
+        # FlowBox automatically computes the number of columns that fit in the
+        # available width, so the gallery re-flows when the pane is resized.
         self._scroll = Gtk.ScrolledWindow()
         self._scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         self._scroll.set_hexpand(True)
         self._scroll.set_vexpand(True)
 
-        self._grid = Gtk.Grid()
-        self._grid.set_column_spacing(12)
-        self._grid.set_row_spacing(12)
-        self._grid.set_margin_top(4)
-        self._grid.set_margin_bottom(12)
-        self._grid.set_margin_start(12)
-        self._grid.set_margin_end(12)
-        self._grid.set_halign(Gtk.Align.START)
-        self._grid.set_valign(Gtk.Align.START)
-        self._scroll.set_child(self._grid)
+        self._flow = Gtk.FlowBox()
+        self._flow.set_column_spacing(12)
+        self._flow.set_row_spacing(12)
+        self._flow.set_margin_top(4)
+        self._flow.set_margin_bottom(12)
+        self._flow.set_margin_start(12)
+        self._flow.set_margin_end(12)
+        self._flow.set_homogeneous(True)    # all cells same width → cards fill the row
+        self._flow.set_selection_mode(Gtk.SelectionMode.NONE)  # selection handled manually
+        self._flow.set_min_children_per_line(1)
+        self._flow.set_max_children_per_line(8)
+        self._flow.set_halign(Gtk.Align.FILL)
+        self._flow.set_valign(Gtk.Align.START)
+        self._scroll.set_child(self._flow)
         self.append(self._scroll)
 
-        # Connect scroll adjustment to sync autoplay on scroll
+        # Sync autoplay as user scrolls, and also when the viewport width changes
+        # (i.e. window resize changes column count).  GTK4 removed size-allocate as
+        # a public signal, so we listen to the horizontal adjustment's page-size
+        # instead — it changes whenever the scrolled window is resized.
         self._scroll.get_vadjustment().connect("value-changed", self._on_scroll_changed)
+        self._scroll.get_hadjustment().connect(
+            "notify::page-size", lambda *_: self._sync_autoplay()
+        )
 
         self._cards: list = []                       # all card widgets, index 0 = top-left
         self._pending: Optional[PendingCard] = None
@@ -1166,32 +1338,46 @@ class GalleryWidget(Gtk.Box):
                     except Exception:
                         pass
 
+    def _cols_per_row(self) -> int:
+        """
+        Estimate the current column count from the FlowBox's allocated width.
+        Used by _sync_autoplay to convert a card's list index to a row number.
+        """
+        w = self._flow.get_allocated_width()
+        if w <= 0:
+            return 2  # sensible fallback before first allocation
+        margin = self._flow.get_margin_start() + self._flow.get_margin_end()
+        col_gap = self._flow.get_column_spacing()
+        # Minimum card width matches GenerationCard.set_size_request(_THUMB_W + 20, …)
+        card_min_w = _THUMB_W + 20
+        usable = max(card_min_w, w - margin)
+        return max(1, (usable + col_gap) // (card_min_w + col_gap))
+
     def _sync_autoplay(self) -> None:
         """
         Play the top-N video cards that are visible in the viewport; pause the rest.
-        Called when play-all is active and the scroll position changes.
+        Called when play-all is active and the scroll position changes or the
+        FlowBox is resized (which changes the column count and therefore row positions).
         """
         if not self._playing_all:
             return
 
         video_cards = self._video_cards()
-        # Determine which cards are "visible" by checking their position relative
-        # to the scrolled window viewport.  GTK4 doesn't expose exact card
-        # coordinates easily without allocation, so we use index order as a
-        # proxy: top-N by index position are treated as "in view".
+        # Determine which cards are "visible" by estimating row positions from the
+        # index order.  GTK4 doesn't expose per-child coordinates cheaply without
+        # forcing a full layout pass, so we use row-index arithmetic as a proxy.
         adj = self._scroll.get_vadjustment()
         scroll_top = adj.get_value()
         scroll_bottom = scroll_top + adj.get_page_size()
 
         # Estimate card height (thumbnail + padding + labels + buttons ≈ 220px)
         _CARD_H_EST = 220
-        _CARD_W_EST = _THUMB_W + 32   # card width with margins
-        cards_per_row = _GALLERY_COLS
+        cards_per_row = self._cols_per_row()
 
         playing_count = 0
         for i, card in enumerate(self._video_cards()):
             row = i // cards_per_row
-            card_top = row * (_CARD_H_EST + 12)   # row * (card_height + row_spacing)
+            card_top = row * (_CARD_H_EST + self._flow.get_row_spacing())
             card_bottom = card_top + _CARD_H_EST
             is_visible = card_bottom > scroll_top and card_top < scroll_bottom
             should_play = is_visible and playing_count < _GALLERY_AUTOPLAY_LIMIT
@@ -1199,16 +1385,24 @@ class GalleryWidget(Gtk.Box):
             if card._hover_video is None:
                 continue
             stream = card._hover_video.get_media_stream()
-            if stream is None:
-                continue
             try:
                 if should_play:
                     playing_count += 1
                     card._media_stack.set_visible_child_name("video")
-                    if not stream.get_playing():
-                        stream.play()
+                    if stream is None:
+                        # Stream not yet initialized; delegate to the card's own
+                        # play helper which retries after the pipeline is ready.
+                        card._play_hover_stream()
+                    else:
+                        # Wire loop handler if this is the first time play-all
+                        # has driven this card (hover may not have done it yet).
+                        if not card._loop_connected:
+                            stream.connect("notify::ended", card._on_stream_ended)
+                            card._loop_connected = True
+                        if not stream.get_playing():
+                            stream.play()
                 else:
-                    if stream.get_playing():
+                    if stream is not None and stream.get_playing():
                         stream.pause()
                     card._media_stack.set_visible_child_name("thumb")
             except Exception:
@@ -1256,19 +1450,34 @@ class GalleryWidget(Gtk.Box):
             record,
             iterate_cb=self._iterate_cb,
             select_cb=self.select_card,
+            delete_cb=self._delete_cb,
         )
 
-    def _relayout(self) -> None:
-        # Remove all children from grid
-        child = self._grid.get_first_child()
-        while child:
-            nxt = child.get_next_sibling()
-            self._grid.remove(child)
-            child = nxt
+    def delete_card(self, record_id: str) -> None:
+        """
+        Remove the card matching record_id from the internal list and re-layout.
+        Called by MainWindow after it has already removed the record from the store.
+        """
+        to_remove = [c for c in self._cards
+                     if isinstance(c, GenerationCard) and c._record.id == record_id]
+        for card in to_remove:
+            if self._selected_card is card:
+                self._selected_card = None
+            self._cards.remove(card)
+        if to_remove:
+            self._relayout()
 
-        for i, card in enumerate(self._cards):
-            row, col = divmod(i, _GALLERY_COLS)
-            self._grid.attach(card, col, row, 1, 1)
+    def _relayout(self) -> None:
+        """Re-populate the FlowBox from self._cards (newest first)."""
+        # Remove all FlowBoxChild wrappers; our card widgets remain alive in self._cards.
+        child = self._flow.get_first_child()
+        while child is not None:
+            nxt = child.get_next_sibling()
+            self._flow.remove(child)
+            child = nxt
+        # Re-add every card; FlowBox automatically wraps each in a FlowBoxChild.
+        for card in self._cards:
+            self._flow.append(card)
 
 
 # ── Control panel ──────────────────────────────────────────────────────────────
@@ -1281,18 +1490,25 @@ class ControlPanel(Gtk.Box):
 
     def __init__(
         self,
-        on_generate,      # (prompt, neg, steps, seed, seed_image_path, model_source, guidance_scale) -> None
-        on_enqueue,       # same signature
-        on_cancel,        # () -> None
-        on_recover,       # () -> None
+        on_generate,       # (prompt, neg, steps, seed, seed_image_path, model_source, guidance_scale) -> None
+        on_enqueue,        # same signature
+        on_cancel,         # () -> None
+        on_recover,        # () -> None
+        on_start_server,   # (model_source: str) -> None
+        on_stop_server,    # () -> None
+        on_source_change,  # (model_source: str) -> None — called after the mode toggle switches
     ):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self._on_generate = on_generate
         self._on_enqueue = on_enqueue
         self._on_cancel = on_cancel
         self._on_recover = on_recover
+        self._on_start_server = on_start_server
+        self._on_stop_server = on_stop_server
+        self._on_source_change = on_source_change
         self._seed_image_path = ""
         self._server_ready = False
+        self._server_launching = False   # True while start/stop script is running
         self._busy = False
         self._model_source = "video"   # "video" or "image"
         self.set_margin_top(12)
@@ -1529,11 +1745,54 @@ class ControlPanel(Gtk.Box):
         self._seed_row_widget = seed_row
         self.append(seed_row)
 
-        # ── Server status ──────────────────────────────────────────────────────
+        # ── Server control ─────────────────────────────────────────────────────
+        # Status row: indicator label + Start + Stop buttons side by side.
+        srv_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
         self._server_lbl = Gtk.Label(label="⬤  Checking server…")
         self._server_lbl.set_xalign(0)
+        self._server_lbl.set_hexpand(True)
         self._server_lbl.add_css_class("muted")
-        self.append(self._server_lbl)
+        srv_row.append(self._server_lbl)
+
+        self._server_start_btn = Gtk.Button(label="▶ Start")
+        self._server_start_btn.add_css_class("server-start-btn")
+        self._server_start_btn.set_tooltip_text(
+            "Start the inference server using the local launch script.\n"
+            "Video tab → start_wan.sh  ·  Image tab → start_flux.sh"
+        )
+        self._server_start_btn.set_sensitive(False)  # enabled once health check confirms server is offline
+        self._server_start_btn.connect("clicked", self._on_start_server_clicked)
+        srv_row.append(self._server_start_btn)
+
+        self._server_stop_btn = Gtk.Button(label="■ Stop")
+        self._server_stop_btn.add_css_class("server-stop-btn")
+        self._server_stop_btn.set_tooltip_text(
+            "Stop the running inference server Docker container.\n"
+            "Stops any container using the tt-media-inference-server image."
+        )
+        self._server_stop_btn.set_sensitive(False)  # enabled once server is confirmed running
+        self._server_stop_btn.connect("clicked", self._on_stop_server_clicked)
+        srv_row.append(self._server_stop_btn)
+
+        self.append(srv_row)
+
+        # Collapsible log area — shown while a start/stop operation is in progress.
+        self._srv_log_revealer = Gtk.Revealer()
+        self._srv_log_revealer.set_transition_type(Gtk.RevealerTransitionType.SLIDE_DOWN)
+        self._srv_log_revealer.set_transition_duration(150)
+        self._srv_log_buf = Gtk.TextBuffer()
+        srv_log_view = Gtk.TextView.new_with_buffer(self._srv_log_buf)
+        srv_log_view.set_editable(False)
+        srv_log_view.set_cursor_visible(False)
+        srv_log_view.set_wrap_mode(Gtk.WrapMode.CHAR)
+        srv_log_view.add_css_class("server-log")
+        srv_log_scroll = Gtk.ScrolledWindow()
+        srv_log_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        srv_log_scroll.set_size_request(-1, 90)
+        srv_log_scroll.set_child(srv_log_view)
+        self._srv_log_scroll = srv_log_scroll
+        self._srv_log_revealer.set_child(srv_log_scroll)
+        self.append(self._srv_log_revealer)
 
         # Push buttons to bottom
         spacer = Gtk.Box()
@@ -1626,6 +1885,10 @@ class ControlPanel(Gtk.Box):
             if adj.get_value() < 12:
                 adj.set_value(12)
 
+        # Notify the main window so it can switch the gallery stack to show
+        # only the cards that match the newly selected generation mode.
+        self._on_source_change(source)
+
     def get_model_source(self) -> str:
         return self._model_source
 
@@ -1635,11 +1898,45 @@ class ControlPanel(Gtk.Box):
             self._server_lbl.set_label("⬤  Server ready")
             self._server_lbl.remove_css_class("muted")
             self._server_lbl.add_css_class("teal")
+            # Collapse the startup log once the server is confirmed up.
+            if self._server_launching:
+                self.set_server_launching(False)
         else:
-            self._server_lbl.set_label("⬤  Server loading…")
+            self._server_lbl.set_label("⬤  Server offline")
             self._server_lbl.remove_css_class("teal")
             self._server_lbl.add_css_class("muted")
+        # Start button enabled when server is offline and no operation running.
+        # Stop button enabled only when server is confirmed running.
+        if not self._server_launching:
+            self._server_start_btn.set_sensitive(not ready)
+            self._server_stop_btn.set_sensitive(ready)
         self._update_btns()
+
+    # ── Server control helpers ─────────────────────────────────────────────────
+
+    def set_server_launching(self, launching: bool, clear_log: bool = False) -> None:
+        """Show or hide the startup log panel and lock Start/Stop during the operation."""
+        self._server_launching = launching
+        self._srv_log_revealer.set_reveal_child(launching)
+        if clear_log:
+            self._srv_log_buf.set_text("")
+        # While an operation is in progress, disable both buttons to prevent overlap.
+        self._server_start_btn.set_sensitive(not launching)
+        self._server_stop_btn.set_sensitive(not launching)
+
+    def append_server_log(self, line: str) -> None:
+        """Append one line to the server startup log. Must be called on the main thread."""
+        end = self._srv_log_buf.get_end_iter()
+        self._srv_log_buf.insert(end, line + "\n")
+        # Auto-scroll the log to the bottom so the latest output is always visible.
+        adj = self._srv_log_scroll.get_vadjustment()
+        adj.set_value(adj.get_upper() - adj.get_page_size())
+
+    def _on_start_server_clicked(self, _btn) -> None:
+        self._on_start_server(self._model_source)
+
+    def _on_stop_server_clicked(self, _btn) -> None:
+        self._on_stop_server()
 
     def set_busy(self, busy: bool) -> None:
         self._busy = busy
@@ -1913,6 +2210,10 @@ class MainWindow(Gtk.ApplicationWindow):
         self._worker: Optional[threading.Thread] = None
         self._worker_gen: Optional[GenerationWorker] = None
         self._queue: list = []
+        self._server_proc: Optional[subprocess.Popen] = None  # running start/stop script subprocess
+        # Track which gallery owns the current pending card (set in _on_generate,
+        # used in _on_finished/_on_error to update the right gallery).
+        self._gen_gallery = None
 
         self._build_ui()
         self._load_history()
@@ -1937,6 +2238,9 @@ class MainWindow(Gtk.ApplicationWindow):
             on_enqueue=self._on_enqueue,
             on_cancel=self._on_cancel,
             on_recover=self._on_recover,
+            on_start_server=self._on_start_server,
+            on_stop_server=self._on_stop_server,
+            on_source_change=self._on_source_change,
         )
         self._controls.set_remove_queue_cb(self._on_queue_remove)
         outer_paned.set_start_child(self._controls)
@@ -1948,11 +2252,26 @@ class MainWindow(Gtk.ApplicationWindow):
         inner_paned.set_position(480)   # default gallery width before detail panel
 
         gallery_wrap = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        self._gallery = GalleryWidget(
+
+        # Two separate galleries — one for video cards, one for image cards.
+        # A Gtk.Stack switches between them when the generation source toggle changes.
+        self._gallery_stack = Gtk.Stack()
+        self._gallery_stack.set_transition_type(Gtk.StackTransitionType.SLIDE_LEFT_RIGHT)
+        self._gallery_stack.set_transition_duration(150)
+        self._gallery_stack.set_hexpand(True)
+        self._gallery_stack.set_vexpand(True)
+
+        shared_cbs = dict(
             iterate_cb=self._controls.populate_prompts,
             select_cb=self._on_card_selected,
+            delete_cb=self._on_delete_card,
         )
-        gallery_wrap.append(self._gallery)
+        self._video_gallery = GalleryWidget(**shared_cbs, media_type="video")
+        self._image_gallery = GalleryWidget(**shared_cbs, media_type="image")
+        self._gallery_stack.add_named(self._video_gallery, "video")
+        self._gallery_stack.add_named(self._image_gallery, "image")
+        self._gallery_stack.set_visible_child_name("video")
+        gallery_wrap.append(self._gallery_stack)
 
         # Status bar spans the full bottom of the gallery+detail area
         self._status_lbl = Gtk.Label(label="Ready")
@@ -1974,15 +2293,59 @@ class MainWindow(Gtk.ApplicationWindow):
         """Update status bar. Safe to call from main thread only."""
         self._status_lbl.set_label(text)
 
+    # ── Gallery helpers ────────────────────────────────────────────────────────
+
+    def _active_gallery(self) -> "GalleryWidget":
+        """Return the gallery that matches the currently selected generation source."""
+        return self._gallery_for_type(self._controls.get_model_source())
+
+    def _gallery_for_type(self, media_type: str) -> "GalleryWidget":
+        """Return the video or image gallery for the given media_type string."""
+        return self._image_gallery if media_type == "image" else self._video_gallery
+
+    def _on_source_change(self, source: str) -> None:
+        """Switch the gallery stack when the user toggles between video and image mode."""
+        self._gallery_stack.set_visible_child_name(source)
+
+    # ── Card selection ─────────────────────────────────────────────────────────
+
     def _on_card_selected(self, record: GenerationRecord) -> None:
         """Called when the user clicks a gallery card. Populates the detail panel."""
         self._detail.show_record(record, self._controls.populate_prompts)
 
+    def _on_delete_card(self, record: GenerationRecord) -> None:
+        """
+        Delete a generation: remove from history JSON, delete the media and thumbnail
+        files from disk, remove the card from the gallery, and clear the detail panel
+        if it was showing the deleted record.
+        """
+        removed = self._store.delete(record.id)
+        if removed:
+            # Delete associated files; tolerate missing files gracefully.
+            for fpath in (removed.video_path, removed.image_path, removed.thumbnail_path):
+                if fpath:
+                    try:
+                        Path(fpath).unlink(missing_ok=True)
+                    except Exception:
+                        pass
+        self._gallery_for_type(record.media_type).delete_card(record.id)
+        if self._detail._record is not None and self._detail._record.id == record.id:
+            self._detail.clear()
+        short = record.prompt[:50] + ("…" if len(record.prompt) > 50 else "")
+        self._set_status(f'Deleted: "{short}"')
+
     def _load_history(self) -> None:
         records = self._store.all_records()
-        if records:
-            self._gallery.load_history(records)
-            self._set_status(f"Loaded {len(records)} previous generation(s)")
+        if not records:
+            return
+        # Route each record to the gallery that matches its media type.
+        video_recs = [r for r in records if r.media_type != "image"]
+        image_recs = [r for r in records if r.media_type == "image"]
+        if video_recs:
+            self._video_gallery.load_history(video_recs)
+        if image_recs:
+            self._image_gallery.load_history(image_recs)
+        self._set_status(f"Loaded {len(records)} previous generation(s)")
 
     # ── Health worker ──────────────────────────────────────────────────────────
 
@@ -2015,7 +2378,10 @@ class MainWindow(Gtk.ApplicationWindow):
         if self._worker and self._worker.is_alive():
             return
 
-        pending = self._gallery.add_pending_card(prompt=prompt, model_source=model_source)
+        # Add the pending card to the gallery that matches the generation type,
+        # and remember that gallery so _on_finished/_on_error update the right one.
+        self._gen_gallery = self._gallery_for_type(model_source)
+        pending = self._gen_gallery.add_pending_card(prompt=prompt, model_source=model_source)
         self._controls.set_busy(True)
         self._controls.clear_prompt()
 
@@ -2057,6 +2423,82 @@ class MainWindow(Gtk.ApplicationWindow):
         if self._worker_gen:
             self._worker_gen.cancel()
         self._set_status("Cancelling…")
+
+    # ── Server start / stop ────────────────────────────────────────────────────
+
+    def _on_start_server(self, model_source: str) -> None:
+        """Launch the appropriate server script in a background thread, streaming output to the log panel."""
+        script_name = "start_flux.sh" if model_source == "image" else "start_wan.sh"
+        script_path = str(Path(__file__).parent / script_name)
+        label = "FLUX image" if model_source == "image" else "Wan2.2 video"
+
+        self._controls.set_server_launching(True, clear_log=True)
+        self._controls.append_server_log(f"Starting {label} server ({script_name} --gui)…")
+        self._set_status(f"Launching {label} server…")
+
+        def run():
+            try:
+                proc = subprocess.Popen(
+                    [script_path, "--gui"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,
+                    stdin=subprocess.DEVNULL,
+                )
+                self._server_proc = proc
+                for line in proc.stdout:
+                    GLib.idle_add(self._controls.append_server_log, line.rstrip())
+                proc.wait()
+                if proc.returncode != 0:
+                    GLib.idle_add(self._controls.append_server_log,
+                                  f"Script exited with code {proc.returncode}")
+                    GLib.idle_add(self._set_status, "Server start script failed — check log")
+                    GLib.idle_add(self._controls.set_server_launching, False)
+                else:
+                    GLib.idle_add(self._set_status,
+                                  f"{label} server started — waiting for health check…")
+                    # Leave the log panel open; set_server_ready(True) will collapse it.
+            except Exception as e:
+                GLib.idle_add(self._controls.append_server_log, f"Error: {e}")
+                GLib.idle_add(self._set_status, f"Server start error: {e}")
+                GLib.idle_add(self._controls.set_server_launching, False)
+            finally:
+                self._server_proc = None
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _on_stop_server(self) -> None:
+        """Run the stop command (via start_wan.sh --stop) in a background thread."""
+        # Both video and image use the same Docker image, so either script can stop it.
+        script_path = str(Path(__file__).parent / "start_wan.sh")
+
+        self._controls.set_server_launching(True, clear_log=True)
+        self._controls.append_server_log("Stopping inference server…")
+        self._set_status("Stopping inference server…")
+
+        def run():
+            try:
+                proc = subprocess.Popen(
+                    [script_path, "--stop"],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    stdin=subprocess.DEVNULL,
+                )
+                self._server_proc = proc
+                output = proc.communicate()[0]
+                for line in output.splitlines():
+                    GLib.idle_add(self._controls.append_server_log, line)
+                GLib.idle_add(self._set_status, "Server stopped.")
+            except Exception as e:
+                GLib.idle_add(self._controls.append_server_log, f"Error: {e}")
+                GLib.idle_add(self._set_status, f"Server stop error: {e}")
+            finally:
+                self._server_proc = None
+                GLib.idle_add(self._controls.set_server_launching, False)
+
+        threading.Thread(target=run, daemon=True).start()
 
     # ── Queue ──────────────────────────────────────────────────────────────────
 
@@ -2136,7 +2578,9 @@ class MainWindow(Gtk.ApplicationWindow):
             self._attach_recovery_job(job)
 
     def _attach_recovery_job(self, job: dict) -> None:
-        pending = self._gallery.add_pending_card()
+        # Recovery jobs are video jobs (Wan2.2); route to the video gallery.
+        self._gen_gallery = self._video_gallery
+        pending = self._video_gallery.add_pending_card()
         pending.update_status(f"Recovering {job['id'][:8]}… ({job['status']})")
         self._controls.set_busy(True)
 
@@ -2170,7 +2614,9 @@ class MainWindow(Gtk.ApplicationWindow):
         return False
 
     def _on_finished(self, record: GenerationRecord) -> bool:
-        self._gallery.replace_pending_with(record)
+        gallery = self._gen_gallery or self._gallery_for_type(record.media_type)
+        gallery.replace_pending_with(record)
+        self._gen_gallery = None
         self._controls.set_busy(False)
         media_path = record.media_file_path
         self._set_status(f"Done — {media_path}  ({record.duration_s:.0f}s)")
@@ -2178,7 +2624,9 @@ class MainWindow(Gtk.ApplicationWindow):
         return False
 
     def _on_error(self, message: str) -> bool:
-        self._gallery.remove_pending()
+        gallery = self._gen_gallery or self._active_gallery()
+        gallery.remove_pending()
+        self._gen_gallery = None
         self._controls.set_busy(False)
         self._set_status(f"Error: {message}")
         return False
@@ -2187,4 +2635,6 @@ class MainWindow(Gtk.ApplicationWindow):
         self._health_stop.set()
         if self._worker_gen:
             self._worker_gen.cancel()
+        if self._server_proc and self._server_proc.poll() is None:
+            self._server_proc.terminate()
         return False  # allow close

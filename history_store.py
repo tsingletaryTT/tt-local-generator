@@ -195,5 +195,18 @@ class HistoryStore:
         """Return all records, newest first."""
         return list(reversed(self._records))
 
+    def delete(self, record_id: str) -> Optional[GenerationRecord]:
+        """
+        Remove the record with the given ID, persist the change, and return
+        the removed record so the caller can also delete its files on disk.
+        Returns None if no matching record was found.
+        """
+        removed = next((r for r in self._records if r.id == record_id), None)
+        if removed is None:
+            return None
+        self._records = [r for r in self._records if r.id != record_id]
+        self._save()
+        return removed
+
     def __len__(self) -> int:
         return len(self._records)

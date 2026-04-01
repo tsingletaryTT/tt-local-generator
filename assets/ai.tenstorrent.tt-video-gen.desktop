@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=TT Generator
+GenericName=AI Media Generator
+Comment=Generate videos and images with Tenstorrent hardware (Wan2.2 / FLUX)
+Exec=/usr/bin/python3 /home/ttuser/code/tt-local-generator/main.py
+Icon=ai.tenstorrent.tt-video-gen
+Terminal=false
+Categories=Graphics;Video;AudioVideo;
+Keywords=tenstorrent;ai;video;image;generate;flux;wan;
+StartupNotify=true
+StartupWMClass=tt-video-gen

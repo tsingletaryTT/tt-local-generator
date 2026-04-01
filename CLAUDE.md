@@ -13,17 +13,28 @@ Use the **system** python3 (`/usr/bin/python3`), not a venv. GTK4 bindings
 sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0  # if missing
 ```
 
-## Starting the inference server
+## Starting / stopping the inference server
+
+From the GUI, use the **▶ Start** and **■ Stop** buttons in the server control
+row (below the Generation Source toggle). Start is context-aware: Video tab
+runs `start_wan.sh`, Image tab runs `start_flux.sh`. Script output streams into
+a collapsible log panel; the panel closes automatically when the health check
+confirms the server is ready.
+
+From the terminal:
 
 ```bash
 cd ~/code/tt-local-generator
-./start_wan.sh
+./start_wan.sh          # start Wan2.2 server, tail its log
+./start_wan.sh --stop   # stop the running server container
+./start_flux.sh         # start FLUX server, tail its log
+./start_flux.sh --stop  # stop the running server container
 ```
 
-The script reads `JWT_SECRET` from `~/code/tt-inference-server/.env`, sets
-`MODEL_SOURCE=huggingface` to skip interactive prompts, launches the Docker
-container, then tails the log. The server is ready when the log prints
-`Application startup complete` (takes ~5 min on P150x4).
+Both scripts accept `--gui` (used internally by the GUI) to skip interactive
+prompts and the final `tail -f`, so the subprocess exits cleanly once Docker is
+up. The server is ready when the log prints `Application startup complete`
+(~5 min on P150x4 for Wan2.2).
 
 ## Architecture
 
@@ -119,6 +130,56 @@ button clicks or `_on_finished`).
   cb.job = job_dict   # yes
   cb.set_data("job", job_dict)  # RuntimeError
   ```
+
+## Assets
+
+`assets/` contains:
+- `tenstorrent.png` — 32×32 app icon (pulled from tenstorrent.com/favicon.ico)
+- `ai.tenstorrent.tt-video-gen.desktop` — XDG desktop entry for GNOME/KDE launchers
+
+`setup_ubuntu.sh` copies both into the correct XDG locations automatically.
+To install manually:
+```bash
+cp assets/tenstorrent.png ~/.local/share/icons/hicolor/32x32/apps/ai.tenstorrent.tt-video-gen.png
+cp assets/ai.tenstorrent.tt-video-gen.desktop ~/.local/share/applications/
+update-desktop-database ~/.local/share/applications
+```
+
+## Video hover / looping
+
+`Gtk.Video.set_loop(True)` is unreliable when playback is driven by calling
+`get_media_stream().play()` directly — it bypasses GTK's internal
+`notify::ended` → seek(0) → play() loop restart logic.
+
+**Fix in place**: `GenerationCard._play_hover_stream()` lazily connects a
+`notify::ended` handler (`_on_stream_ended`) the first time a stream is played,
+then manually seeks to 0 and restarts. `_loop_connected` guards against double-
+connecting.
+
+The stream itself is created lazily by GStreamer and `get_media_stream()` returns
+`None` until the `Gtk.Video` widget has been realized. `_play_hover_stream()`
+retries via `GLib.timeout_add(100, ...)` if the stream is not yet available.
+
+## GTK Application single-instance behaviour
+
+`Gtk.Application` uses D-Bus to enforce a single instance per `application_id`
+by default. If any process has already registered `ai.tenstorrent.tt-video-gen`
+on the session bus, a second `./tt-gen` invocation silently exits (code 0)
+without ever firing `activate`.
+
+**Fix in place**: `main.py` calls `app.set_flags(Gio.ApplicationFlags.NON_UNIQUE)`
+so every launch is independent. If the app is not opening, also check for a
+stale process: `pgrep -a python3 | grep main.py`.
+
+## Stale .pyc cache
+
+If the app crashes with a traceback pointing to a line number that doesn't
+match the source, the bytecode cache is stale (e.g. from an earlier version).
+Clear it with:
+```bash
+find ~/code/tt-local-generator -name "*.pyc" -delete
+find ~/code/tt-local-generator -name "__pycache__" -type d -exec rm -rf {} +
+```
 
 ## Known issues / history
 

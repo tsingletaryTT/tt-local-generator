@@ -11,6 +11,8 @@
 # Usage:
 #   ./start_flux.sh             # start server and tail its log
 #   ./start_flux.sh --schnell   # use FLUX.1-schnell (faster, lower quality)
+#   ./start_flux.sh --stop      # stop the running server container
+#   ./start_flux.sh --gui       # start without interactive prompts or tail (for GUI use)
 #   ./start_flux.sh --help      # show this help
 
 set -euo pipefail
@@ -21,17 +23,38 @@ DOCKER_IMAGE="ghcr.io/tenstorrent/tt-media-inference-server:0.11.1-bac8b34"
 MODEL="FLUX.1-dev"
 LOG_DIR="$REPO_DIR/workflow_logs/docker_server"
 
-# ── Help ──────────────────────────────────────────────────────────────────────
+# ── Parse flags ───────────────────────────────────────────────────────────────
 
-if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    sed -n '2,12p' "$0" | sed 's/^# \?//'
-    exit 0
-fi
-
-if [[ "${1:-}" == "--schnell" ]]; then
-    MODEL="FLUX.1-schnell"
-    echo "Using FLUX.1-schnell (fewer steps needed, lower quality)."
-fi
+GUI_MODE=0
+for arg in "$@"; do
+    case "$arg" in
+        --help|-h)
+            sed -n '2,16p' "$0" | sed 's/^# \?//'
+            exit 0
+            ;;
+        --stop)
+            # Stop the running server container and exit.
+            RUNNING=$(docker ps --filter "ancestor=$DOCKER_IMAGE" --format "{{.ID}}" 2>/dev/null)
+            if [[ -z "$RUNNING" ]]; then
+                echo "No running server container found."
+                exit 0
+            fi
+            echo "Stopping container(s): $RUNNING"
+            echo "$RUNNING" | xargs docker stop
+            echo "Server stopped."
+            exit 0
+            ;;
+        --schnell)
+            MODEL="FLUX.1-schnell"
+            echo "Using FLUX.1-schnell (fewer steps needed, lower quality)."
+            ;;
+        --gui)
+            # GUI mode: skip interactive prompts and the final tail -f.
+            # The caller (GUI app) monitors readiness via the /tt-liveness health check.
+            GUI_MODE=1
+            ;;
+    esac
+done
 
 LOG_GLOB="media_*_${MODEL}_p300x2_server.log"
 
@@ -52,8 +75,12 @@ if [[ ! -d "$HF_CACHE_DIR" ]]; then
     echo "         Pre-download with:"
     echo "           huggingface-cli download ${HF_REPO}"
     echo "         (~20 GB for FLUX.1-dev, ~7 GB for FLUX.1-schnell)"
-    read -rp "Continue anyway (weights will download inside container)? [y/N] " yn
-    [[ "${yn,,}" == "y" ]] || exit 1
+    if [[ $GUI_MODE -eq 1 ]]; then
+        echo "         Continuing in GUI mode (weights will download inside container)."
+    else
+        read -rp "Continue anyway (weights will download inside container)? [y/N] " yn
+        [[ "${yn,,}" == "y" ]] || exit 1
+    fi
 fi
 
 # ── Check for running container ───────────────────────────────────────────────
@@ -62,6 +89,10 @@ EXISTING=$(docker ps --filter "ancestor=$DOCKER_IMAGE" --format "{{.ID}}" 2>/dev
 if [[ -n "$EXISTING" ]]; then
     echo "Server already running in container $EXISTING"
     echo ""
+    if [[ $GUI_MODE -eq 1 ]]; then
+        echo "Server is already up. Use the GUI health indicator to confirm readiness."
+        exit 0
+    fi
     LATEST_LOG=$(ls -t "$LOG_DIR"/$LOG_GLOB 2>/dev/null | head -1 || true)
     if [[ -n "$LATEST_LOG" ]]; then
         echo "Tailing log: $LATEST_LOG"
@@ -131,7 +162,6 @@ if [[ -z "$LOG_FILE" ]]; then
 fi
 
 echo "Log file: $LOG_FILE"
-echo "(Ctrl-C to stop tailing — server keeps running in Docker)"
 echo ""
 echo "Tip: the server prints 'Application startup complete' when ready (~3–5 min)."
 echo ""
@@ -144,4 +174,12 @@ echo "    | python3 -c \"import sys,json,base64; d=json.load(sys.stdin); open('/
 echo "  xdg-open /tmp/test.jpg"
 echo ""
 
+if [[ $GUI_MODE -eq 1 ]]; then
+    # In GUI mode the caller monitors readiness via the health check endpoint.
+    echo "Server started in Docker. GUI health check will detect when ready."
+    exit 0
+fi
+
+# Interactive mode: tail the log indefinitely (Ctrl-C to stop; server keeps running in Docker).
+echo "(Ctrl-C to stop tailing — server keeps running in Docker)"
 tail -f "$LOG_FILE"

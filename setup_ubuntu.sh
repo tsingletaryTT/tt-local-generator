@@ -17,6 +17,7 @@
 #   - tt-inference-server repo (cloned to ~/code/tt-inference-server)
 #   - tt-local-generator repo (cloned to ~/code/tt-local-generator)
 #   - tt-inference-server Python requirements (system python3)
+#   - Docker image pre-pulled (~12–18 GB; skipped if already present)
 #
 # Assumptions:
 #   - Ubuntu 24.04 LTS (Noble), x86_64
@@ -240,9 +241,70 @@ pip3 install --break-system-packages requests
 echo "  ✓ Python dependencies installed"
 echo ""
 
-# ── 6. Smoke-test GTK4 import ─────────────────────────────────────────────────
+# ── 6. Pre-pull Docker inference server image ─────────────────────────────────
+# The Docker image is ~12–18 GB to download (≈30 GB uncompressed on disk).
+# Pulling it now means ./start_wan.sh and ./start_flux.sh start immediately
+# instead of spending 30–60 min downloading inside Docker on first launch.
 
-echo "── Step 6: Smoke test ──────────────────────────────────────"
+echo "── Step 6: Docker image pre-pull ───────────────────────────"
+
+DOCKER_IMAGE="ghcr.io/tenstorrent/tt-media-inference-server:0.11.1-bac8b34"
+
+if docker image inspect "$DOCKER_IMAGE" &>/dev/null 2>&1; then
+    echo "  ✓ Docker image already present — skipping pull"
+else
+    echo ""
+    echo "  ╔══════════════════════════════════════════════════════════╗"
+    echo "  ║  WARNING: About to pull ~12–18 GB Docker image.         ║"
+    echo "  ║  This will take a while (30–60 min on a typical          ║"
+    echo "  ║  connection). Grab a coffee. Don't interrupt it.         ║"
+    echo "  ╚══════════════════════════════════════════════════════════╝"
+    echo ""
+    echo "  Pulling: $DOCKER_IMAGE"
+    echo ""
+    docker pull "$DOCKER_IMAGE"
+    echo "  ✓ Docker image pulled"
+fi
+echo ""
+
+# ── 7. Desktop entry (GNOME / KDE app menu) ──────────────────────────────────
+
+echo "── Step 7: Desktop entry ───────────────────────────────────"
+
+DESKTOP_DIR="$HOME/.local/share/applications"
+ICON_DIR="$HOME/.local/share/icons/hicolor/32x32/apps"
+APP_DIR="$HOME/code/tt-local-generator"
+
+mkdir -p "$DESKTOP_DIR" "$ICON_DIR"
+
+# Install icon into XDG hicolor theme so the DE can find it by application ID
+cp "$APP_DIR/assets/tenstorrent.png" "$ICON_DIR/ai.tenstorrent.tt-video-gen.png"
+gtk-update-icon-cache "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
+
+# Write the .desktop file
+cat > "$DESKTOP_DIR/ai.tenstorrent.tt-video-gen.desktop" << DESKTOPEOF
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=TT Generator
+GenericName=AI Media Generator
+Comment=Generate videos and images with Tenstorrent hardware (Wan2.2 / FLUX)
+Exec=/usr/bin/python3 $APP_DIR/main.py
+Icon=ai.tenstorrent.tt-video-gen
+Terminal=false
+Categories=Graphics;Video;AudioVideo;
+Keywords=tenstorrent;ai;video;image;generate;flux;wan;
+StartupNotify=true
+StartupWMClass=tt-video-gen
+DESKTOPEOF
+
+update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
+echo "  ✓ Desktop entry installed (search for 'TT Generator' in your app launcher)"
+echo ""
+
+# ── 8. Smoke-test GTK4 import ─────────────────────────────────────────────────
+
+echo "── Step 8: Smoke test ──────────────────────────────────────"
 /usr/bin/python3 -c "
 import gi
 gi.require_version('Gtk', '4.0')

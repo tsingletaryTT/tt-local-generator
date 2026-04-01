@@ -15,12 +15,17 @@ Requires system python3-gi (GTK4 bindings) — install via:
 """
 import argparse
 import sys
+from pathlib import Path
 
 import gi
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gtk, Gio
+gi.require_version("GdkPixbuf", "2.0")
+from gi.repository import Gtk, Gio, GdkPixbuf
 
 from main_window import MainWindow
+
+# Path to the bundled Tenstorrent icon (32×32 PNG, fetched from tenstorrent.com)
+_ICON_PATH = Path(__file__).parent / "assets" / "tenstorrent.png"
 
 
 def main():
@@ -34,9 +39,22 @@ def main():
     args, gtk_args = parser.parse_known_args()
 
     app = Gtk.Application(application_id="ai.tenstorrent.tt-video-gen")
+    # Allow multiple instances — avoids silent no-op when an existing session-bus
+    # registration is present (e.g. a stale process or a second launch).
+    app.set_flags(Gio.ApplicationFlags.NON_UNIQUE)
 
     def on_activate(application):
         win = MainWindow(app=application, server_url=args.server)
+        # Set window icon from bundled asset; fall back gracefully if missing.
+        if _ICON_PATH.exists():
+            try:
+                pixbuf = GdkPixbuf.Pixbuf.new_from_file(str(_ICON_PATH))
+                win.set_icon_name("ai.tenstorrent.tt-video-gen")  # XDG name
+                # GTK4 uses the application icon; set it via the display's
+                # default icon list as a pixbuf fallback.
+                Gtk.Window.set_default_icon_name("ai.tenstorrent.tt-video-gen")
+            except Exception:
+                pass
         win.present()
 
     app.connect("activate", on_activate)
