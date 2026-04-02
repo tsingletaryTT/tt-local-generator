@@ -63,6 +63,48 @@ See **[GUIDE.md](GUIDE.md)** for the full walkthrough: server setup, API tour, t
 | `start_flux.sh` | FLUX image server launch script (`--stop`, `--gui`, `--schnell` flags) |
 | `setup_ubuntu.sh` | One-shot Ubuntu 24.04 dependency installer (pulls Docker image, installs desktop entry) |
 | `assets/` | Bundled assets: `tenstorrent.png` icon, `ai.tenstorrent.tt-video-gen.desktop` |
+| `prompt_client.py` | HTTP client for the prompt gen server — no GTK deps |
+| `prompt_server.py` | Local Qwen3-0.6B chat server (CPU, port 8001) |
+| `start_prompt_gen.sh` | Prompt gen server launch script (`--stop`, `--gui` flags) |
+| `prompts/prompt_generator.md` | System prompt defining the cinematic mad-libs format |
+
+## Prompt generator (optional)
+
+The **✨ Inspire me** button below the prompt textarea generates cinematic prompts
+using a local [Qwen3-0.6B](https://huggingface.co/Qwen/Qwen3-0.6B) model running
+entirely on CPU — it does not use the TT chips and coexists with a running video/image
+server on port 8000.
+
+### One-time setup
+
+```bash
+pip install transformers torch accelerate
+# The model (~1.2 GB) downloads from Hugging Face automatically on first start
+```
+
+### Starting the server
+
+```bash
+./start_prompt_gen.sh          # start, tail log (Ctrl-C leaves server running)
+./start_prompt_gen.sh --stop   # stop
+```
+
+Or just click **✨ Inspire me** in the app — if the server isn't running, the UI
+will offer to start it for you.
+
+### Usage
+
+- With an **empty prompt box**: generates a fresh cinematic prompt for the current
+  mode (Video / Image / Animate) using the model's built-in word banks.
+- With **existing text**: uses your text as a creative seed and generates a new
+  prompt inspired by it. The existing text is replaced by the result.
+
+### Quick health check
+
+```bash
+curl -s http://localhost:8001/health
+# → {"status":"ok","model_ready":true}
+```
 
 ## License
 
