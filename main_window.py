@@ -2319,6 +2319,13 @@ class ControlPanel(Gtk.Box):
             if adj.get_value() < 12:
                 adj.set_value(12)
 
+        # Re-evaluate match/mismatch for the newly selected tab.
+        if self._running_model is not None or self._server_ready:
+            self.set_server_state(
+                self._server_ready or (self._running_model is not None),
+                self._running_model
+            )
+
         # Notify the main window so it can switch the gallery stack to show
         # only the cards that match the newly selected generation mode.
         self._on_source_change(source)
@@ -2367,25 +2374,66 @@ class ControlPanel(Gtk.Box):
         """Return the currently selected image model key ('flux' or future)."""
         return self._image_model
 
-    def set_server_ready(self, ready: bool) -> None:
-        self._server_ready = ready
-        if ready:
-            # Update the new two-line status labels to reflect server online state.
-            self._server_model_lbl.set_label("Server ready")
-            self._server_sub_lbl.set_label("localhost:8000 reachable")
-            self._apply_server_row_style("match")
-            # Collapse the startup log once the server is confirmed up.
-            if self._server_launching:
-                self.set_server_launching(False)
-        else:
+    def set_server_state(self, ready: bool, running_model: "str | None") -> None:
+        """
+        Update all server-related UI from a health check result.
+
+        ready         — True if /tt-liveness returned 200
+        running_model — model ID string from /v1/models, or None if unknown/offline
+        """
+        self._running_model = running_model
+        self._server_ready = False  # recalculated below
+
+        if self._server_launching:
+            # Launching state is driven by set_server_launching(); don't override it.
+            return
+
+        if not ready:
+            # Offline
+            self._apply_server_row_style("offline")
             self._server_model_lbl.set_label("No server")
             self._server_sub_lbl.set_label("localhost:8000 unreachable")
-            self._apply_server_row_style("offline")
-        # Start button enabled when server is offline and no operation running.
-        # Stop button enabled only when server is confirmed running.
-        if not self._server_launching:
-            self._server_start_btn.set_sensitive(not ready)
-            self._server_stop_btn.set_sensitive(ready)
+            self._server_start_btn.set_sensitive(True)
+            self._server_stop_btn.set_sensitive(False)
+            self._server_switch_btn.set_visible(False)
+        else:
+            # Server is up — determine match/mismatch
+            source_for_model = (
+                _MODEL_TO_SOURCE.get(running_model) if running_model else None
+            )
+            current_source = self._model_source
+            mismatch = (
+                source_for_model is not None
+                and source_for_model != current_source
+            )
+            display = (
+                _MODEL_DISPLAY_SERVER.get(running_model, "Server online")
+                if running_model
+                else "Server online"
+            )
+
+            if mismatch:
+                self._apply_server_row_style("mismatch")
+                self._server_model_lbl.set_label(display)
+                self._server_sub_lbl.set_label(
+                    f"{current_source.capitalize()} tab needs a different server"
+                )
+                self._server_ready = False
+                self._server_switch_btn.set_visible(True)
+                self._server_start_btn.set_sensitive(False)
+                self._server_stop_btn.set_sensitive(True)
+            else:
+                self._apply_server_row_style("match")
+                self._server_model_lbl.set_label(display)
+                self._server_sub_lbl.set_label("localhost:8000")
+                self._server_ready = True
+                self._server_switch_btn.set_visible(False)
+                self._server_start_btn.set_sensitive(False)
+                self._server_stop_btn.set_sensitive(True)
+                # Collapse startup log once server confirmed ready
+                if self._server_launching:
+                    self.set_server_launching(False)
+
         self._update_btns()
 
     # ── Server control helpers ─────────────────────────────────────────────────
@@ -2433,9 +2481,22 @@ class ControlPanel(Gtk.Box):
         self._on_stop_server()
 
     def _on_switch_to_running_model_tab(self, _btn) -> None:
-        """Switch to the source tab that matches the running server model.
-        Stub — full implementation added in Task 6 (set_server_state)."""
-        pass
+        """Switch the source selector to the tab that matches the running model."""
+        source = _MODEL_TO_SOURCE.get(self._running_model) if self._running_model else None
+        if source:
+            self.switch_to_source(source)
+
+    def switch_to_source(self, source: str) -> None:
+        """
+        Programmatically activate a source tab.
+        Fires _set_source() via the existing toggled signal handler.
+        """
+        if source == "video":
+            self._src_video_btn.set_active(True)
+        elif source == "animate":
+            self._src_animate_btn.set_active(True)
+        elif source == "image":
+            self._src_image_btn.set_active(True)
 
     def set_busy(self, busy: bool) -> None:
         self._busy = busy
@@ -2951,7 +3012,7 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def _on_health_result(self, ready: bool) -> bool:
         # Runs on main thread (called by GLib.idle_add).
-        self._controls.set_server_ready(ready)
+        self._controls.set_server_state(ready, None)
         if ready and not (self._worker_gen and self._worker_gen._running()):
             self._set_status("Server ready — enter a prompt and click Generate")
         return False  # don't repeat (one-shot idle callback)
@@ -3074,7 +3135,7 @@ class MainWindow(Gtk.ApplicationWindow):
                 else:
                     GLib.idle_add(self._set_status,
                                   f"{label} server started — waiting for health check…")
-                    # Leave the log panel open; set_server_ready(True) will collapse it.
+                    # Leave the log panel open; set_server_state(True, ...) will collapse it.
             except Exception as e:
                 GLib.idle_add(self._controls.append_server_log, f"Error: {e}")
                 GLib.idle_add(self._set_status, f"Server start error: {e}")
