@@ -1661,12 +1661,13 @@ class ControlPanel(Gtk.Box):
         # set_group() links animate and image to the video button as group leader.
         self._src_animate_btn.set_group(self._src_video_btn)
         self._src_image_btn.set_group(self._src_video_btn)
-        self._src_video_btn.set_active(True)
+        # Connect before set_active so the toggled signal is handled at startup.
         # Guard with b.get_active() so the callback only fires when a button is
         # turned ON (not when it is deactivated by another group member being clicked).
         self._src_video_btn.connect("toggled", lambda b: b.get_active() and self._set_source("video"))
         self._src_animate_btn.connect("toggled", lambda b: b.get_active() and self._set_source("animate"))
         self._src_image_btn.connect("toggled", lambda b: b.get_active() and self._set_source("image"))
+        self._src_video_btn.set_active(True)
         src_row.append(self._src_video_btn)
         src_row.append(self._src_animate_btn)
         src_row.append(self._src_image_btn)
@@ -1692,9 +1693,9 @@ class ControlPanel(Gtk.Box):
         )
         # Video model button group — only one model active at a time.
         self._mdl_mochi_btn.set_group(self._mdl_wan2_btn)
-        self._mdl_wan2_btn.set_active(True)
         self._mdl_wan2_btn.connect("toggled", lambda b: b.get_active() and self._set_model("wan2"))
         self._mdl_mochi_btn.connect("toggled", lambda b: b.get_active() and self._set_model("mochi"))
+        self._mdl_wan2_btn.set_active(True)
         self._model_sel_row.append(self._mdl_wan2_btn)
         self._model_sel_row.append(self._mdl_mochi_btn)
 
@@ -1969,9 +1970,9 @@ class ControlPanel(Gtk.Box):
         )
         # Animate mode button group — only one mode active at a time.
         self._anim_mode_repl_btn.set_group(self._anim_mode_anim_btn)
-        self._anim_mode_anim_btn.set_active(True)
         self._anim_mode_anim_btn.connect("toggled", lambda b: b.get_active() and self._set_animate_mode("animation"))
         self._anim_mode_repl_btn.connect("toggled", lambda b: b.get_active() and self._set_animate_mode("replacement"))
+        self._anim_mode_anim_btn.set_active(True)
         mode_row.append(self._anim_mode_anim_btn)
         mode_row.append(self._anim_mode_repl_btn)
         self._animate_box.append(mode_row)
