@@ -435,6 +435,63 @@ scrollbar slider:hover {
     color: @tt_accent;
     font-size: 9px;
 }
+
+/* -- Inspire row (prompt generator) --------------------------------------- */
+.inspire-btn {
+    background-color: @tt_bg_darkest;
+    color: @tt_accent_light;
+    border: 1px solid @tt_border;
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 11px;
+}
+.inspire-btn:hover {
+    background-color: @tt_bg_dark;
+    border-color: @tt_accent;
+    color: @tt_text;
+}
+.inspire-btn:disabled {
+    color: @tt_text_muted;
+    border-color: @tt_bg_dark;
+}
+.inspire-btn-loading {
+    background-color: @tt_bg_darkest;
+    color: @tt_accent;
+    border: 1px solid @tt_accent;
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 11px;
+}
+.inspire-dot {
+    font-size: 9px;
+    color: @tt_text_muted;
+}
+.inspire-dot-ready {
+    font-size: 9px;
+    color: #27AE60;
+}
+.inspire-dot-starting {
+    font-size: 9px;
+    color: @tt_accent;
+}
+.inspire-confirm-box {
+    background-color: @tt_bg_darkest;
+    border: 1px solid @tt_accent;
+    border-radius: 4px;
+    padding: 6px 8px;
+    margin-top: 2px;
+}
+.inspire-confirm-btn {
+    background-color: @tt_bg_dark;
+    color: @tt_accent;
+    border: 1px solid @tt_accent;
+    border-radius: 3px;
+    padding: 3px 8px;
+    font-size: 11px;
+}
+.inspire-confirm-btn:hover {
+    background-color: @tt_border;
+}
 """
 
 # ── Prompt component chips ────────────────────────────────────────────────────
