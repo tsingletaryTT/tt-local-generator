@@ -6,8 +6,6 @@ import pytest
 from pathlib import Path
 from chip_config import load_chips, ChipEntry, ChipCategory
 
-FIXTURES = Path(__file__).parent / "fixtures"
-
 def _yaml(content: str, tmp_path: Path) -> Path:
     p = tmp_path / "chips.yaml"
     p.write_text(content)
