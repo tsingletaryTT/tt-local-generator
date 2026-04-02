@@ -139,7 +139,7 @@ _CSS = b"""
     font-style: italic;
 }
 .attractor-stop-btn {
-    background-color: #2D1A1A;
+    background-color: @tt_bg_error_dark;
     color: @tt_error;
     border: 1px solid @tt_error;
     border-radius: 4px;
