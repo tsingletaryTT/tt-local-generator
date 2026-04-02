@@ -90,7 +90,7 @@ entry:focus, textview:focus, spinbutton:focus {
 scrolledwindow.prompt-error {
     border: 2px solid @tt_error;
 }
-.error-label {
+label.prompt-error {
     color: @tt_error;
     font-size: 11px;
     margin-top: 2px;
@@ -1761,7 +1761,7 @@ class ControlPanel(Gtk.Box):
 
         # Inline validation error label — hidden until Generate is clicked with empty prompt
         self._prompt_error_lbl = Gtk.Label(label="Prompt cannot be empty.")
-        self._prompt_error_lbl.add_css_class("error-label")
+        self._prompt_error_lbl.add_css_class("prompt-error")
         self._prompt_error_lbl.set_halign(Gtk.Align.START)
         self._prompt_error_lbl.set_visible(False)
         self.append(self._prompt_error_lbl)
