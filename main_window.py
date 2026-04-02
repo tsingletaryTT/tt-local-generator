@@ -51,6 +51,9 @@ _CSS = b"""
 @define-color tt_text_muted  #607D8B;
 @define-color tt_pink        #EC96B8;
 @define-color tt_error       #FF6B6B;
+@define-color tt_bg_error_dark #2D1A1A;
+@define-color tt_bg_pink_dark  #2D1A2D;
+@define-color tt_text_hint     #4A6572;
 
 window, .view {
     background-color: @tt_bg_darkest;
@@ -115,7 +118,7 @@ button:disabled {
     color: @tt_text_muted;
 }
 .cancel-btn {
-    background-color: #2D1A1A;
+    background-color: @tt_bg_error_dark;
     color: @tt_error;
     border: 1px solid @tt_error;
     border-radius: 4px;
@@ -187,7 +190,7 @@ scrollbar slider:hover {
     font-weight: bold;
 }
 .type-badge-image {
-    background-color: #2D1A2D;
+    background-color: @tt_bg_pink_dark;
     color: @tt_pink;
     border: 1px solid @tt_pink;
     border-radius: 3px;
@@ -207,7 +210,7 @@ scrollbar slider:hover {
     margin-top: 8px;
 }
 .hint {
-    color: #4A6572;
+    color: @tt_text_hint;
     font-size: 10px;
     margin-top: -2px;
 }
@@ -287,7 +290,7 @@ scrollbar slider:hover {
     border-color: @tt_border;
 }
 .server-stop-btn {
-    background-color: #2D1A1A;
+    background-color: @tt_bg_error_dark;
     color: @tt_error;
     border: 1px solid @tt_error;
     border-radius: 4px;
@@ -313,7 +316,7 @@ scrollbar slider:hover {
     min-width: 0;
 }
 .trash-btn:hover {
-    background-color: #2D1A1A;
+    background-color: @tt_bg_error_dark;
     color: @tt_error;
 }
 .server-log {
