@@ -2093,24 +2093,41 @@ class ControlPanel(Gtk.Box):
         self._seed_spin.connect("value-changed", lambda _: self._update_adv_summary())
         self._update_adv_summary()
 
-        # ── Server control ─────────────────────────────────────────────────────
-        # Status row: indicator label + Start + Stop buttons side by side.
-        srv_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        self._server_lbl = Gtk.Label(label="⬤  Checking server…")
-        self._server_lbl.set_xalign(0)
-        self._server_lbl.set_hexpand(True)
-        self._server_lbl.add_css_class("muted")
-        srv_row.append(self._server_lbl)
+        # ── Server status row ─────────────────────────────────────────────────
+        # Two-line status box: dot + model name + sub-label + action buttons.
+        self._server_status_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self._server_status_box.add_css_class("server-row-offline")
 
+        # Left side: indicator dot
+        self._server_dot_lbl = Gtk.Label(label="⬤")
+        self._server_dot_lbl.add_css_class("server-model-offline")
+        self._server_status_box.append(self._server_dot_lbl)
+
+        # Center: two-line text column (model name + sub-label)
+        text_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        text_col.set_hexpand(True)
+        self._server_model_lbl = Gtk.Label(label="No server")
+        self._server_model_lbl.add_css_class("server-model-lbl")
+        self._server_model_lbl.add_css_class("server-model-offline")
+        self._server_model_lbl.set_xalign(0)
+        self._server_sub_lbl = Gtk.Label(label="localhost:8000 unreachable")
+        self._server_sub_lbl.add_css_class("server-sub-lbl")
+        self._server_sub_lbl.set_xalign(0)
+        text_col.append(self._server_model_lbl)
+        text_col.append(self._server_sub_lbl)
+        self._server_status_box.append(text_col)
+
+        # Right side: action buttons (Start, Stop, Switch tab)
+        btn_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
         self._server_start_btn = Gtk.Button(label="▶ Start")
         self._server_start_btn.add_css_class("server-start-btn")
         self._server_start_btn.set_tooltip_text(
             "Start the inference server using the local launch script.\n"
             "Video → start_wan.sh  ·  Animate → start_animate.sh  ·  Image → start_flux.sh"
         )
-        self._server_start_btn.set_sensitive(False)  # enabled once health check confirms server is offline
+        self._server_start_btn.set_sensitive(False)
         self._server_start_btn.connect("clicked", self._on_start_server_clicked)
-        srv_row.append(self._server_start_btn)
+        btn_col.append(self._server_start_btn)
 
         self._server_stop_btn = Gtk.Button(label="■ Stop")
         self._server_stop_btn.add_css_class("server-stop-btn")
@@ -2118,11 +2135,21 @@ class ControlPanel(Gtk.Box):
             "Stop the running inference server Docker container.\n"
             "Stops any container using the tt-media-inference-server image."
         )
-        self._server_stop_btn.set_sensitive(False)  # enabled once server is confirmed running
+        self._server_stop_btn.set_sensitive(False)
         self._server_stop_btn.connect("clicked", self._on_stop_server_clicked)
-        srv_row.append(self._server_stop_btn)
+        btn_col.append(self._server_stop_btn)
 
-        self.append(srv_row)
+        self._server_switch_btn = Gtk.Button(label="Switch tab")
+        self._server_switch_btn.add_css_class("server-switch-btn")
+        self._server_switch_btn.set_visible(False)
+        self._server_switch_btn.set_tooltip_text(
+            "Switch to the source tab that matches the running server model"
+        )
+        self._server_switch_btn.connect("clicked", self._on_switch_to_running_model_tab)
+        btn_col.append(self._server_switch_btn)
+
+        self._server_status_box.append(btn_col)
+        self.append(self._server_status_box)
 
         # Collapsible log area — shown while a start/stop operation is in progress.
         self._srv_log_revealer = Gtk.Revealer()
@@ -2342,16 +2369,17 @@ class ControlPanel(Gtk.Box):
     def set_server_ready(self, ready: bool) -> None:
         self._server_ready = ready
         if ready:
-            self._server_lbl.set_label("⬤  Server ready")
-            self._server_lbl.remove_css_class("muted")
-            self._server_lbl.add_css_class("teal")
+            # Update the new two-line status labels to reflect server online state.
+            self._server_model_lbl.set_label("Server ready")
+            self._server_sub_lbl.set_label("localhost:8000 reachable")
+            self._apply_server_row_style("match")
             # Collapse the startup log once the server is confirmed up.
             if self._server_launching:
                 self.set_server_launching(False)
         else:
-            self._server_lbl.set_label("⬤  Server offline")
-            self._server_lbl.remove_css_class("teal")
-            self._server_lbl.add_css_class("muted")
+            self._server_model_lbl.set_label("No server")
+            self._server_sub_lbl.set_label("localhost:8000 unreachable")
+            self._apply_server_row_style("offline")
         # Start button enabled when server is offline and no operation running.
         # Stop button enabled only when server is confirmed running.
         if not self._server_launching:
@@ -2371,6 +2399,24 @@ class ControlPanel(Gtk.Box):
         self._server_start_btn.set_sensitive(not launching)
         self._server_stop_btn.set_sensitive(not launching)
 
+    def _apply_server_row_style(self, state: str) -> None:
+        """
+        Switch server row and dot/model labels to the given state style.
+        state is one of: 'offline', 'match', 'mismatch', 'starting'.
+        Removes all server-row-* and server-model-* classes before adding the new one.
+        """
+        for cls in ("server-row-offline", "server-row-match",
+                    "server-row-mismatch", "server-row-starting"):
+            self._server_status_box.remove_css_class(cls)
+        self._server_status_box.add_css_class(f"server-row-{state}")
+
+        for cls in ("server-model-offline", "server-model-match",
+                    "server-model-mismatch", "server-model-starting"):
+            self._server_dot_lbl.remove_css_class(cls)
+            self._server_model_lbl.remove_css_class(cls)
+        self._server_dot_lbl.add_css_class(f"server-model-{state}")
+        self._server_model_lbl.add_css_class(f"server-model-{state}")
+
     def append_server_log(self, line: str) -> None:
         """Append one line to the server startup log. Must be called on the main thread."""
         end = self._srv_log_buf.get_end_iter()
@@ -2384,6 +2430,11 @@ class ControlPanel(Gtk.Box):
 
     def _on_stop_server_clicked(self, _btn) -> None:
         self._on_stop_server()
+
+    def _on_switch_to_running_model_tab(self, _btn) -> None:
+        """Switch to the source tab that matches the running server model.
+        Stub — full implementation added in Task 6 (set_server_state)."""
+        pass
 
     def set_busy(self, busy: bool) -> None:
         self._busy = busy
