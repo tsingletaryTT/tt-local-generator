@@ -45,9 +45,12 @@ def test_pool_add_record_appears_later_in_cycle():
     pool.advance()
     new_rec = _rec()
     pool.add_record(new_rec)
-    # The new record's index (4) must appear at position >= current pos
-    remaining = [pool.advance() for _ in range(4)]
-    assert 4 in remaining
+    # The new record's index (4) must NOT be immediately next
+    next_idx = pool.advance()
+    assert next_idx != 4, "New record should not be immediately next after add_record()"
+    # But it must appear somewhere in the remainder of this cycle
+    remaining = [pool.advance() for _ in range(3)]
+    assert 4 in remaining, "New record must appear later in current cycle"
 
 def test_avg_image_duration_uses_video_durations():
     recs = [_rec("video", 6.0), _rec("video", 10.0), _rec("image", 0.0)]
@@ -64,3 +67,10 @@ def test_current_record_returns_correct_record():
     pool = AttractorPool(recs)
     idx = pool.advance()
     assert pool.current_record() is recs[idx]
+
+def test_pool_size_property():
+    recs = [_rec(), _rec(), _rec()]
+    pool = AttractorPool(recs)
+    assert pool.size == 3
+    pool.add_record(_rec())
+    assert pool.size == 4

@@ -59,8 +59,11 @@ class AttractorPool:
         """
         new_idx = len(self._records)
         self._records.append(record)
-        # Insert anywhere from current pos to end of order
-        insert_at = random.randint(self._pos, len(self._order))
+        # Insert at any position strictly after the current pos so the new record
+        # doesn't play immediately next.  If _pos is already at or past the end of
+        # _order (cycle about to reshuffle), the only valid slot is the end.
+        lower = min(self._pos + 1, len(self._order))
+        insert_at = random.randint(lower, len(self._order))
         self._order.insert(insert_at, new_idx)
         self._recalc_duration()
 
