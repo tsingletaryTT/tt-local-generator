@@ -82,6 +82,14 @@ def test_generate_prompt_raises_on_empty_content():
             prompt_client.generate_prompt("video", "", "sys")
 
 
+def test_check_health_false_on_json_decode_error():
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.side_effect = ValueError("No JSON object could be decoded")
+    with patch("prompt_client.requests.get", return_value=mock_resp):
+        assert prompt_client.check_health() is False
+
+
 def test_generate_prompt_raises_on_no_choices():
     mock_resp = MagicMock()
     mock_resp.status_code = 200

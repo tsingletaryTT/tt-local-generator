@@ -28,7 +28,7 @@ def check_health(base_url: str = _DEFAULT_URL) -> bool:
         if resp.status_code == 200:
             return bool(resp.json().get("model_ready"))
         return False
-    except requests.RequestException:
+    except (requests.RequestException, ValueError):
         return False
 
 
