@@ -2,3 +2,5 @@ __pycache__/
 *.py[cod]
 *.swp
 .DS_Store
+.superpowers/
+prompts/markov_output.txt

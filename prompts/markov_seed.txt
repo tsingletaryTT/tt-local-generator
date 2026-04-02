@@ -1,0 +1,91 @@
+# markov_seed.txt — Seed corpus for Markov chain prompt generation.
+#
+# Format: type|prompt text
+# Types: video, image, animate
+# Lines starting with # are comments and are ignored.
+#
+# These are high-quality example prompts covering all registers.
+# Add good generated outputs here to expand the corpus over time.
+# markovify uses state_size=2 — aim for varied sentence length and structure.
+
+# ── Video prompts ──────────────────────────────────────────────────────────────
+
+video|A crop picker walks the length of an empty furrow at 5am, the Salinas Valley still grey before the crew arrives, static wide shot, heartbreaking and ordinary.
+video|An android watering a plastic houseplant in a sparse Burbank apartment, California morning light too perfect outside, locked-off static, quietly wrong.
+video|A ravegoer covered in yellow pollen walks out of a Manchester warehouse at dawn, canal water reflecting orange streetlights, handheld shaky, exhausted and luminous.
+video|Two identical girls stand at the end of a hotel corridor, floral wallpaper, one overhead bulb, the far end dark, static wide, the specific dread of a familiar place.
+video|A woman walks through a burning Los Angeles neighborhood with a notebook, smoke rising on both sides, slow tracking shot, resolute and steady.
+video|A talking beet sits upright in a folding chair in a Winnebago, evening light through the windshield, locked-off static, absurdist and warm.
+video|A Harryhausen skeleton rises from a wheat field in choppy 12fps motion, harvest moon behind it, wide static shot, ominous in a friendly way.
+video|A Roland TR-808 sits in a dark room with one red LED blinking, a hand reaches in from the right and presses a pad, static close-up, flat and declarative.
+video|Big Bird stands alone in a dense fog at the end of Sesame Street, enormous and entirely calm, looking left, locked-off wide, eerie and still.
+video|A man in a grey suit waits in a queue that has not moved since morning, an office corridor extending behind him further than it should, static wide, bureaucratically depressed.
+video|A CRT monitor with a burnt-in Windows 95 desktop sits in an empty office, dead pixel grid spreading from the lower corner, static close-up, quietly apocalyptic.
+video|A jalopy loaded with furniture crests a dusty hill on Route 66, flat gold light, nothing ahead or behind, locked-off wide, heartbreaking and determined.
+video|A woman in a 1960s California suburb stands in her perfect front yard watching the neighbor mow the same strip of lawn for the fourth time, handheld, uneasy and still.
+video|A man in a deep-sea diving suit walks slowly across a supermarket parking lot at 3am, sodium vapor orange overhead, slow tracking shot, matter-of-fact and strange.
+video|A Mellotron with a stuck key plays in an empty concert hall, tape loops spilling out like ribbon, a single overhead light, static wide, melancholy and quiet.
+video|A Theremin on a stand in a brutalist studio, a hand approaches but does not touch it, slow push in from behind, intimate and breathless.
+video|A cartoon coyote runs off a cliff edge and hangs in the air a moment before looking down, flat painted desert behind it, locked-off static, Saturday morning cartoon palette.
+video|A woman with a suitcase full of clocks checks each one against the next, a Greyhound bus moving through Nebraska outside the window, static close-up, tender and slightly broken.
+video|A robodog sniffs a Manchester canal towpath at 5am, yellow pollen drifting off a fence, slow dolly alongside, fog rising off the water, surreal and unsettling.
+video|A dot matrix printer prints something nobody asked for at 3am in an empty office, the sheet slowly emerging, static wide, flat and declarative.
+video|Rankin/Bass claymation reindeer cross a snowy field in choppy stop motion, breath fake and perfect, static locked-off wide shot, nostalgic for something that may not have happened.
+video|A woman writes the same word on different pieces of paper in a Route 66 diner at 3am, the waitress ignores her, overhead fluorescent, low-level wrongness.
+video|A man drives through the same intersection three times in one continuous shot, a gas station and a hardware store staying constant, handheld, the calm before something.
+video|A Muppet in a tuxedo stands at the edge of a spotlight in an otherwise dark concert hall, does not move, static wide, intimate and still.
+video|A girl who feels everyone else's pain walks through a hospital corridor at 4am, nurses' station empty, call light blinking, steady-cam, exhausted and luminous.
+video|A fax machine receives a transmission from a number disconnected in 1997, the paper slowly emerging, a dark office, one lamp, static wide, buzzing with low-level wrongness.
+video|A hitchhiker with an impossibly large thumb stands at the entrance to a Nevada rest stop at dawn, one semi idling, static wide, absurdist and warm.
+video|A man who can't remember whether he drove to work stands in a perfect California suburb looking at a car that may or may not be his, locked-off static, quietly wrong.
+video|A lava lamp blob drifts upward in slow motion, amber through orange wax, black light ultraviolet making everything glow, static extreme close-up, feverishly alive for no reason.
+video|An Okie mother counts coins on a diner counter at 6am, the waitress pretending not to watch, a single overhead fluorescent, static close-up, heartbreaking and ordinary.
+video|A playground swing moves gently at midnight with no wind, fog at the tree line, static wide, the specific dread of a familiar place at an unfamiliar hour.
+video|Tessellating lizards fill a white plane, colors shifting at the seam between light and dark, camera slowly pulling back to reveal the full pattern, feverishly alive.
+video|A man walks the length of a freight train in a Nebraska yard at 3am, signal lamps blinking, slow tracking shot alongside, melancholy and quiet.
+video|A battery-operated toy slows down as the battery fails in a child's bedroom, mobile no longer spinning above a crib, static wide, unbearably tender.
+video|A Grateful Dead liquid light show projects onto a concert scrim, the band barely visible through it, handheld following one audience member, psychedelic and warm.
+video|A woman who only exists between midnight and 5am walks out of a Manchester club into rain, looking at her hands, slow push in, surreal and breathless.
+video|A Kafka petitioner stands at a checkpoint holding the wrong form for the sixth consecutive morning, a guard who will not explain anything, static wide, formally correct and deeply wrong.
+video|A New Order music video setup — grey industrial building, single figure walking toward camera in an empty car park, locked-off wide, flat and declarative.
+
+# ── Image prompts ──────────────────────────────────────────────────────────────
+
+image|A Moog Minimoog on a kitchen table in a dark apartment, patch cables trailing off the edge, a single desk lamp illuminating the panel, Edward Hopper stillness, ultra-detailed, 35mm film grain.
+image|Two identical girls at the end of a long hotel corridor, floral wallpaper, one overhead bulb, photorealistic, ultra-detailed, shallow depth of field, 35mm film grain.
+image|A walk-in closet stretching impossibly deep, a single bare bulb swinging, moth-eaten clothes casting long shadows, photorealistic, ultra-detailed, shallow depth of field.
+image|The turbulent cloudscape of Jupiter's upper atmosphere, swirling amber and cream storm bands, a vast vortex eye glowing from within, digital matte painting, ultra-detailed, 8K.
+image|An old fisherman sitting on a dock at dawn, fog on the water, diffuse morning light, Edward Hopper stillness, ultra-detailed, 35mm film grain, shallow depth of field.
+image|A test pattern on a 1974 color television in a dark living room, static glow, a child's shoe on the carpet, photorealistic, ultra-detailed, 35mm film grain.
+image|Harryhausen skeletons in a Greek temple ruin at dusk, long shadows, oil painting, ultra-detailed, wide aperture, cinematic color grading.
+image|A Buchla synthesizer glowing orange in an empty concert hall, rows of seats dark, bioluminescent light, ultra-detailed, photorealistic, 35mm film grain, masterpiece.
+image|A Route 66 diner at 3am, one waitress visible through the window, neon sign reflection in wet asphalt, Dorothea Lange documentary black and white, ultra-detailed.
+image|A woman in a faded house dress hanging laundry between two poplars, flat grey overcast light, a dog asleep in the foreground, WPA mural style, ultra-detailed, 8K.
+image|A pet cemetery at the edge of a Maine wood at dusk, markers tilting, fog among the headstones, photorealistic, ultra-detailed, 35mm film grain, shallow depth of field.
+image|Big Bird standing alone in fog, enormous and calm, Sesame Street primary color, ultra-detailed, masterpiece, wide aperture.
+image|A modular synthesizer wall in a brutalist studio — hundreds of patch cables, knobs, an oscilloscope showing sine waves, ultra-detailed, 8K, photorealistic.
+image|A Greyhound bus interior at night, a child asleep against a window, highway lights strobing past, 1970s Kodachrome, ultra-detailed, 35mm film grain, shallow depth of field.
+image|A reel-to-reel machine with a snapped tape flapping on every revolution, a dark studio, one lamp, ultra-detailed, photorealistic, shallow depth of field.
+image|A commune dining table set for twelve with no one sitting, Big Sur fog coming through an open door, William Eggleston dye transfer color, ultra-detailed, 35mm film grain.
+image|A Klein bottle on a kitchen table in a domestic setting, morning light, everything else ordinary, Escher lithograph style, ultra-detailed, 8K, masterpiece.
+image|A Nick Park clay character — enormous expressive face, one eyebrow raised, a garage workshop behind them, ultra-detailed, photorealistic, shallow depth of field.
+image|A laundromat at 4am, one machine running, a woman asleep in a plastic chair, sodium vapor orange through the window, ultra-detailed, 35mm film grain, cinematic color grading.
+image|A Peter Max psychedelic poster — flat magenta, electric blue, lime green, a face fractured into layers, day-glo palette, ultra-detailed, 8K, masterpiece.
+
+# ── Animate prompts ────────────────────────────────────────────────────────────
+
+animate|An elderly fisherman slowly turns his face toward the horizon, weathered expression softening into a quiet smile, harbor at dawn, soft diffuse morning light, nostalgic and still.
+animate|A woman in flowing white silk raises her arms above her head with eyes closed, temple courtyard at dusk, warm golden light from behind, serene and weightless.
+animate|A young woman covered in yellow pollen raises her face to the rain, exhausted and luminous, Manchester street at dawn, sodium orange streetlight behind her.
+animate|An Okie mother counts coins with both hands on a formica counter, lips moving slightly, close-up, flat fluorescent from above, heartbreaking and determined.
+animate|A girl slowly turns to face the camera with her hands at her sides, an empty field behind her, blue hour, she knows something she hasn't decided to tell yet.
+animate|A man in a grey suit stands at a window in an office that goes on too long, staring at nothing, flat overcast light, bureaucratically resigned.
+animate|Big Bird slowly cranes his enormous head to look directly at the viewer, warm Sesame Street afternoon light, gentle and patient.
+animate|A woman with markings on her arms slowly raises one hand, palm out, firelight from below, a community behind her in shadow, powerful and still.
+animate|A Nick Park clay character raises one enormous eyebrow and turns to look at the camera, garage workshop light, knowing and deadpan.
+animate|A young man who has been sitting very still for a long time slowly opens his eyes, fog behind him, first light, the moment before he decides to move.
+animate|An android slowly looks up from the plastic houseplant it has been watering, head tilting slightly, grey apartment light, uncertain about something.
+animate|A woman sitting in a laundromat chair at 4am slowly realizes she has been asleep and looks around, sodium orange through the glass, disoriented and calm.
+animate|A hitchhiker with an impossible thumb turns to face a truck that is not yet visible, Nevada rest stop, first light, absurdist and patient.
+animate|A man in a diving suit slowly removes his helmet in a parking lot, looks up at the sky, sodium vapor orange, matter-of-fact and strange.
+animate|A dancer in silk slowly brings her arms down and opens her eyes, a breath, the end of something, stage footlights from below, triumphant and still.

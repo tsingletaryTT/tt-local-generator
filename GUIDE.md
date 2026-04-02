@@ -6,6 +6,10 @@ a Tenstorrent P150x4 board, including every timeout, workaround, and error we
 hit along the way. It then tours the API and explains how to use this UI wrapper
 to interact with it.
 
+> **Other models:** For Mochi-1 on QB2 (P300x2 / Blackhole), see
+> [docs/mochi-qb2-setup.md](docs/mochi-qb2-setup.md).
+> For a feature overview of the full UI, see [README.md](README.md).
+
 ---
 
 ## Contents

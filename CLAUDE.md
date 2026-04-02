@@ -198,6 +198,158 @@ find ~/code/tt-local-generator -name "*.pyc" -delete
 find ~/code/tt-local-generator -name "__pycache__" -type d -exec rm -rf {} +
 ```
 
+## Prompt generator
+
+A three-tier algorithmic prompt generator lives alongside the UI. It runs
+independently of the video server and works even when no TT hardware is
+available.
+
+### Files
+
+| File | Purpose |
+|---|---|
+| `generate_prompt.py` | CLI generator — algo → Markov → LLM polish |
+| `word_banks.py` | All word banks as Python lists + sampling helpers |
+| `prompt_server.py` | FastAPI server exposing Qwen3-0.6B on port 8001 |
+| `start_prompt_gen.sh` | Start/stop the prompt server |
+| `prompts/prompt_generator.md` | System prompt for interactive LLM use |
+| `prompts/markov_seed.txt` | Seed corpus for the Markov chain (tagged by type) |
+| `prompts/markov_output.txt` | Accumulate good outputs here to grow the corpus |
+
+### Three-tier design
+
+**Tier 1 — Algorithmic** (`--mode algo`, always available):
+`word_banks.py` contains every category as a Python list. `generate_prompt.py`
+calls `random.choice()` on each slot independently. Selection happens in code,
+not by the LLM, so diversity is guaranteed regardless of model size.
+
+**Tier 2 — Markov** (`--mode markov`, requires `markovify`):
+Trained on `prompts/markov_seed.txt` (and `markov_output.txt` if it exists).
+Produces novel sentence-level recombinations — useful for unexpected register
+collisions. Falls back to algo if the corpus is too small or markovify isn't
+installed.
+
+**Tier 3 — LLM polish** (`--enhance`, default on):
+Sends the tier-1/2 slug to Qwen3-0.6B (port 8001) with a short polishing
+prompt. The LLM only makes the output flow naturally — it does not re-select
+elements. Falls back gracefully (returns the raw slug) if the server is down.
+
+### CLI usage
+
+```bash
+# Default: algo + LLM polish, video type
+python3 generate_prompt.py
+
+# Markov mode, image type
+python3 generate_prompt.py --type image --mode markov
+
+# Algo only, no LLM, five prompts
+python3 generate_prompt.py --count 5 --no-enhance
+
+# Plain text output (no JSON wrapper)
+python3 generate_prompt.py --raw
+
+# All types
+python3 generate_prompt.py --type video    # for Wan2.2 / Mochi
+python3 generate_prompt.py --type image    # for FLUX / SD
+python3 generate_prompt.py --type animate  # for Wan2.2-Animate
+```
+
+### JSON output schema
+
+```json
+{
+  "prompt": "Final polished prompt string",
+  "type":   "video" | "image" | "animate",
+  "source": "llm" | "markov" | "algo",
+  "slug":   "Raw pre-polish slug (always present)"
+}
+```
+
+### Starting the prompt server
+
+```bash
+./start_prompt_gen.sh          # start in background, wait for ready
+./start_prompt_gen.sh --stop   # stop
+./start_prompt_gen.sh --gui    # start silently (no tail, for GUI use)
+```
+
+The server loads Qwen3-0.6B on CPU (~2.9 GB RSS, ~19 tok/s on Ryzen 7 9700X).
+It runs on port 8001 and does not touch the TT chips, so it coexists with any
+video generation server on port 8000.
+
+Health check: `curl -s http://localhost:8001/health`
+→ `{"status":"ok","model_ready":true}`
+
+### Wiring into the UI
+
+The generator is a standalone subprocess — the UI calls it and parses JSON.
+
+**Minimal integration** (one prompt on demand):
+
+```python
+import subprocess, json
+
+def generate_prompt(prompt_type="video", mode="markov"):
+    result = subprocess.run(
+        [
+            "python3",
+            "/home/ttuser/code/tt-local-generator/generate_prompt.py",
+            "--type", prompt_type,
+            "--mode", mode,
+        ],
+        capture_output=True, text=True, timeout=60,
+    )
+    if result.returncode != 0:
+        return None
+    return json.loads(result.stdout)["prompt"]
+```
+
+**Threading** — run the subprocess in a background thread (not the GTK main
+thread). Post the result back with `GLib.idle_add` per the GTK threading rule
+above:
+
+```python
+import threading
+from gi.repository import GLib
+
+def _fetch_prompt_async(prompt_entry, prompt_type="video"):
+    def worker():
+        prompt = generate_prompt(prompt_type)
+        if prompt:
+            GLib.idle_add(prompt_entry.set_text, prompt)
+    threading.Thread(target=worker, daemon=True).start()
+```
+
+**Auto-start the server** (optional): call `start_prompt_gen.sh --gui` from the
+app startup sequence (same pattern as the video server). Poll `/health` until
+`model_ready` is true before enabling the "✨ Generate prompt" button.
+
+**Prompt type mapping**:
+
+| UI tab / source | `--type` |
+|---|---|
+| Video (Wan2.2, Mochi) | `video` |
+| Image (FLUX, SD) | `image` |
+| Animate (Wan2.2-Animate) | `animate` |
+
+### Growing the Markov corpus
+
+Append good generated prompts to `prompts/markov_output.txt` in the same
+tagged format (`video|...`, `image|...`, `animate|...`). The model is rebuilt
+fresh on each `generate_prompt.py` run, so additions take effect immediately.
+This file is intentionally gitignored — it accumulates machine-specific history.
+
+### Extending the word banks
+
+Edit `word_banks.py` directly — add entries to any list. More unusual / specific
+entries outperform common ones (the model anchors to surprising items). After
+editing, the changes take effect on the next `generate_prompt.py` call with no
+restart needed. The `prompts/prompt_generator.md` system prompt is separate and
+used only for interactive LLM chat (not by `generate_prompt.py`).
+
+---
+
 ## Known issues / history
 
 - **ffmpeg stdin hang**: ffmpeg inherited terminal stdin from the process and
