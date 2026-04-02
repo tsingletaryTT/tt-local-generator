@@ -295,6 +295,7 @@ class AnimateGenerationWorker:
         num_inference_steps: int = 20,
         seed: int = -1,
         animate_mode: str = "animation",
+        model: str = "wan2.2-animate-14b",
     ):
         self._client = client
         self._store = store
@@ -304,6 +305,7 @@ class AnimateGenerationWorker:
         self._steps = num_inference_steps
         self._seed = seed
         self._animate_mode = animate_mode
+        self._model = model
         self._cancelled = False
         self._lock = threading.Lock()
 
@@ -386,6 +388,7 @@ class AnimateGenerationWorker:
             seed=self._seed,
             duration_s=round(duration, 1),
             seed_image_path=persisted_ref_image,
+            model=self._model,
         )
 
         # ── 4. Download ────────────────────────────────────────────────────────

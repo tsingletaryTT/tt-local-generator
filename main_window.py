@@ -389,9 +389,27 @@ _DETAIL_VIDEO_H = 270
 # Maps internal model ID strings to short display names shown on gallery badges.
 # Empty string → no badge (legacy records without model attribution).
 _MODEL_DISPLAY: dict = {
-    "wan2.2-t2v":       "Wan2.2",
-    "mochi-1-preview":  "Mochi-1",
-    "flux.1-dev":       "FLUX",
+    "wan2.2-t2v":         "Wan2.2",
+    "mochi-1-preview":    "Mochi-1",
+    "flux.1-dev":         "FLUX",
+    "wan2.2-animate-14b": "Animate-14B",
+}
+
+# Maps (model_source, model_key) to (script_filename, display_label) for server launch.
+_SERVER_SCRIPTS: dict = {
+    ("video",   "wan2"):  ("start_wan.sh",     "Wan2.2 video"),
+    ("video",   "mochi"): ("start_mochi.sh",   "Mochi-1 video"),
+    ("image",   "flux"):  ("start_flux.sh",    "FLUX image"),
+    ("animate", ""):      ("start_animate.sh", "Wan2.2-Animate"),
+}
+
+# Maps short model keys to canonical model ID strings used in GenerationRecord.
+_VIDEO_MODEL_IDS: dict = {
+    "wan2":  "wan2.2-t2v",
+    "mochi": "mochi-1-preview",
+}
+_IMAGE_MODEL_IDS: dict = {
+    "flux": "flux.1-dev",
 }
 
 
@@ -2687,7 +2705,6 @@ class MainWindow(Gtk.ApplicationWindow):
         self._controls.clear_prompt()
 
         if model_source == "image":
-            _IMAGE_MODEL_IDS = {"flux": "flux.1-dev"}
             model_name = _IMAGE_MODEL_IDS.get(
                 model_id or self._controls.get_image_model(), "flux.1-dev"
             )
@@ -2713,9 +2730,9 @@ class MainWindow(Gtk.ApplicationWindow):
                 num_inference_steps=steps,
                 seed=seed,
                 animate_mode=animate_mode,
+                model="wan2.2-animate-14b",
             )
         else:
-            _VIDEO_MODEL_IDS = {"wan2": "wan2.2-t2v", "mochi": "mochi-1-preview"}
             model_name = _VIDEO_MODEL_IDS.get(
                 model_id or self._controls.get_video_model(), "wan2.2-t2v"
             )
@@ -2751,12 +2768,6 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def _on_start_server(self, model_source: str) -> None:
         """Launch the server script matching the current source + model selection."""
-        _SCRIPTS = {
-            ("video",   "wan2"):  ("start_wan.sh",     "Wan2.2 video"),
-            ("video",   "mochi"): ("start_mochi.sh",   "Mochi-1 video"),
-            ("image",   "flux"):  ("start_flux.sh",    "FLUX image"),
-            ("animate", ""):      ("start_animate.sh", "Wan2.2-Animate"),
-        }
         if model_source == "video":
             model_key = self._controls.get_video_model()
         elif model_source == "image":
@@ -2764,8 +2775,8 @@ class MainWindow(Gtk.ApplicationWindow):
         else:
             model_key = ""
 
-        script_name, label = _SCRIPTS.get(
-            (model_source, model_key), ("start_wan.sh", "video")
+        script_name, label = _SERVER_SCRIPTS.get(
+            (model_source, model_key), ("start_wan.sh", "Wan2.2 video")
         )
         script_path = str(Path(__file__).parent / script_name)
 
