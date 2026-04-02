@@ -526,8 +526,9 @@ class AttractorWindow(Gtk.Window):
                     break
                 continue
 
-            # Brief pause before checking queue depth again
-            self._gen_stop.wait(5.0)
+            # Brief pause before checking queue depth again; exit immediately on stop
+            if self._gen_stop.wait(5.0):
+                break
 
     def _enqueue_generation(self, prompt: str) -> None:
         """
