@@ -17,24 +17,41 @@ sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0  # if missing
 
 From the GUI, use the **▶ Start** and **■ Stop** buttons in the server control
 row (below the Generation Source toggle). Start is context-aware: Video tab
-runs `start_wan.sh`, Image tab runs `start_flux.sh`. Script output streams into
-a collapsible log panel; the panel closes automatically when the health check
-confirms the server is ready.
+runs `start_wan.sh`, Animate tab runs `start_animate.sh`, Image tab runs
+`start_flux.sh`. Script output streams into a collapsible log panel; the panel
+closes automatically when the health check confirms the server is ready.
 
 From the terminal:
 
 ```bash
 cd ~/code/tt-local-generator
-./start_wan.sh          # start Wan2.2 server, tail its log
-./start_wan.sh --stop   # stop the running server container
-./start_flux.sh         # start FLUX server, tail its log
-./start_flux.sh --stop  # stop the running server container
+./start_wan.sh            # start Wan2.2-T2V server, tail its log
+./start_wan.sh --stop     # stop the running server container
+./start_animate.sh        # start Wan2.2-Animate-14B server, tail its log
+./start_animate.sh --stop # stop the running server container
+./start_flux.sh           # start FLUX server, tail its log
+./start_flux.sh --stop    # stop the running server container
 ```
 
-Both scripts accept `--gui` (used internally by the GUI) to skip interactive
+All scripts accept `--gui` (used internally by the GUI) to skip interactive
 prompts and the final `tail -f`, so the subprocess exits cleanly once Docker is
 up. The server is ready when the log prints `Application startup complete`
 (~5 min on P150x4 for Wan2.2).
+
+### Animate mode (Wan2.2-Animate-14B)
+
+The **💃 Animate** source toggle activates Wan2.2-Animate-14B, a video-to-video
+character animation model. Unlike the text-to-video T2V mode, it requires:
+
+- **Motion video** — an MP4 supplying the motion pattern
+- **Character image** — PNG/JPG of the character to animate
+- **Mode** — `animation` (character mimics the motion) or `replacement` (character
+  replaces the person in the video)
+
+The text prompt is optional (style guidance only). `start_animate.sh` binds the
+modified `tt-media-server` files from `~/code/tt-inference-server/tt-media-server/`
+into the container and upgrades `diffusers>=0.34.0` before starting uvicorn
+(Phase 1: Diffusers CPU/CUDA path — TT hardware support pending).
 
 ## Architecture
 

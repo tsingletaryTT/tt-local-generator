@@ -227,6 +227,191 @@ class GenerationWorker:
             pass
 
 
+# ── Wan2.2-Animate-14B generation worker ──────────────────────────────────────
+
+class AnimateGenerationWorker:
+    """
+    Runs a single Wan2.2-Animate-14B character animation job in a background thread.
+
+    Like GenerationWorker, the server API is async/job-based — submit then poll.
+    The key difference: a reference motion video and a character image are required
+    inputs, base64-encoded and sent inline with the job submission.
+
+    Two animation modes:
+      "animation"   — character image mimics the motion in the reference video
+      "replacement" — character image replaces the person in the reference video
+
+    Usage (GTK):
+        gen = AnimateGenerationWorker(client, store, reference_video_path,
+                                      reference_image_path, ...)
+        thread = threading.Thread(target=lambda: gen.run_with_callbacks(
+            on_progress=lambda msg: GLib.idle_add(update_status, msg),
+            on_finished=lambda rec: GLib.idle_add(handle_done, rec),
+            on_error=lambda msg: GLib.idle_add(handle_error, msg),
+        ), daemon=True)
+        thread.start()
+    """
+
+    POLL_INTERVAL = 3.0
+
+    def __init__(
+        self,
+        client: APIClient,
+        store: HistoryStore,
+        reference_video_path: str,
+        reference_image_path: str,
+        prompt: str = "",
+        num_inference_steps: int = 20,
+        seed: int = -1,
+        animate_mode: str = "animation",
+    ):
+        self._client = client
+        self._store = store
+        self._ref_video = reference_video_path
+        self._ref_image = reference_image_path
+        self._prompt = prompt
+        self._steps = num_inference_steps
+        self._seed = seed
+        self._animate_mode = animate_mode
+        self._cancelled = False
+        self._lock = threading.Lock()
+
+    def cancel(self) -> None:
+        with self._lock:
+            self._cancelled = True
+
+    def _is_cancelled(self) -> bool:
+        with self._lock:
+            return self._cancelled
+
+    def run_with_callbacks(
+        self,
+        on_progress: Callable[[str], None],
+        on_finished: Callable[[GenerationRecord], None],
+        on_error: Callable[[str], None],
+    ) -> None:
+        """Execute the full pipeline. Call from a background thread."""
+        start_time = time.monotonic()
+
+        # ── 1. Submit ──────────────────────────────────────────────────────────
+        try:
+            on_progress("Submitting animate job…")
+            seed_arg = self._seed if self._seed >= 0 else None
+            job_id = self._client.submit_animate(
+                reference_video_path=self._ref_video,
+                reference_image_path=self._ref_image,
+                prompt=self._prompt,
+                num_inference_steps=self._steps,
+                seed=seed_arg,
+                animate_mode=self._animate_mode,
+            )
+        except Exception as e:
+            on_error(f"Submit failed: {e}")
+            return
+        on_progress(f"Animate job queued ({job_id[:8]}…)")
+
+        # ── 2. Poll until complete ─────────────────────────────────────────────
+        while not self._is_cancelled():
+            try:
+                status, err = self._client.poll_status(job_id)
+            except Exception as e:
+                on_error(f"Poll error: {e}")
+                return
+
+            if status == "completed":
+                break
+            if status in ("failed", "cancelled"):
+                on_error(f"Job {status}: {err or 'no details'}")
+                return
+
+            elapsed = int(time.monotonic() - start_time)
+            on_progress(f"Animating… {elapsed}s ({status})")
+            time.sleep(self.POLL_INTERVAL)
+
+        if self._is_cancelled():
+            on_error("Cancelled by user")
+            return
+
+        # ── 3. Build record ────────────────────────────────────────────────────
+        duration = time.monotonic() - start_time
+
+        # Persist the character image alongside the video as seed_image_path
+        # so the detail panel can show it as context.
+        persisted_ref_image = ""
+        ref_img = Path(self._ref_image)
+        if ref_img.is_file():
+            dest = THUMBNAILS_DIR / f"animate_char_{job_id[:8]}{ref_img.suffix}"
+            try:
+                shutil.copy2(ref_img, dest)
+                persisted_ref_image = str(dest)
+            except Exception:
+                persisted_ref_image = self._ref_image
+
+        record = GenerationRecord.new(
+            job_id=job_id,
+            prompt=self._prompt or f"[animate:{self._animate_mode}]",
+            negative_prompt="",
+            num_inference_steps=self._steps,
+            seed=self._seed,
+            duration_s=round(duration, 1),
+            seed_image_path=persisted_ref_image,
+        )
+
+        # ── 4. Download ────────────────────────────────────────────────────────
+        try:
+            on_progress(f"Downloading video… ({duration:.0f}s total)")
+            self._client.download(job_id, Path(record.video_path))
+        except Exception as e:
+            on_error(f"Download failed: {e}")
+            return
+
+        # ── 5. Thumbnail ───────────────────────────────────────────────────────
+        self._extract_thumbnail(record.video_path, record.thumbnail_path)
+
+        # ── 6. Sidecar ─────────────────────────────────────────────────────────
+        self._write_prompt_sidecar(record)
+
+        # ── 7. Persist and notify ──────────────────────────────────────────────
+        self._store.append(record)
+        on_finished(record)
+
+    def _write_prompt_sidecar(self, record: GenerationRecord) -> None:
+        txt_path = Path(record.video_path).with_suffix(".txt")
+        lines = [
+            f"mode: animate:{self._animate_mode}",
+            f"prompt: {record.prompt}",
+            f"reference_video: {self._ref_video}",
+            f"reference_image: {self._ref_image}",
+            f"steps: {record.num_inference_steps}",
+            f"seed: {record.seed}",
+            f"generated: {record.created_at}",
+            f"duration_s: {record.duration_s}",
+        ]
+        try:
+            txt_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        except Exception:
+            pass
+
+    def _extract_thumbnail(self, video_path: str, thumbnail_path: str) -> None:
+        Path(thumbnail_path).parent.mkdir(parents=True, exist_ok=True)
+        try:
+            subprocess.run(
+                [
+                    "ffmpeg", "-y",
+                    "-i", video_path,
+                    "-vframes", "1",
+                    "-q:v", "2",
+                    "-update", "1",
+                    thumbnail_path,
+                ],
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                timeout=30,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
+
+
 # ── FLUX image generation worker ───────────────────────────────────────────────
 
 class ImageGenerationWorker:

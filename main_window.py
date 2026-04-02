@@ -34,7 +34,7 @@ from gi.repository import GdkPixbuf, GLib, Gtk, Pango
 
 from api_client import APIClient
 from history_store import GenerationRecord, HistoryStore
-from worker import GenerationWorker, ImageGenerationWorker
+from worker import AnimateGenerationWorker, GenerationWorker, ImageGenerationWorker
 
 
 # ── Tenstorrent dark palette as GTK CSS ───────────────────────────────────────
@@ -234,8 +234,13 @@ scrollbar slider:hover {
 .source-btn-left {
     border-radius: 4px 0 0 4px;
 }
+.source-btn-mid {
+    border-radius: 0;
+    border-left-width: 0;
+}
 .source-btn-right {
     border-radius: 0 4px 4px 0;
+    border-left-width: 0;
 }
 .source-btn-active {
     background-color: #4FD1C5;
@@ -441,8 +446,11 @@ class _QueueItem:
     steps: int
     seed: int
     seed_image_path: str = ""
-    model_source: str = "video"     # "video" (Wan2.2) or "image" (FLUX)
+    model_source: str = "video"     # "video" (Wan2.2), "image" (FLUX), or "animate"
     guidance_scale: float = 3.5     # used when model_source == "image"
+    ref_video_path: str = ""        # used when model_source == "animate"
+    ref_char_path: str = ""         # used when model_source == "animate"
+    animate_mode: str = "animation" # "animation" or "replacement"
 
 
 # ── Generation card ────────────────────────────────────────────────────────────
@@ -1171,6 +1179,8 @@ class PendingCard(Gtk.Frame):
         # Label differs by media type so the user can tell what is in flight
         if model_source == "image":
             spinner_text = "🖼 Generating image…"
+        elif model_source == "animate":
+            spinner_text = "💃 Animating…"
         else:
             spinner_text = "⏳ Generating video…"
         spinner_lbl = Gtk.Label(label=spinner_text)
@@ -1490,7 +1500,7 @@ class ControlPanel(Gtk.Box):
 
     def __init__(
         self,
-        on_generate,       # (prompt, neg, steps, seed, seed_image_path, model_source, guidance_scale) -> None
+        on_generate,       # (prompt, neg, steps, seed, seed_image_path, model_source, guidance_scale, ref_video_path, ref_char_path, animate_mode) -> None
         on_enqueue,        # same signature
         on_cancel,         # () -> None
         on_recover,        # () -> None
@@ -1507,10 +1517,13 @@ class ControlPanel(Gtk.Box):
         self._on_stop_server = on_stop_server
         self._on_source_change = on_source_change
         self._seed_image_path = ""
+        self._ref_video_path = ""      # animate: motion source video
+        self._ref_char_path = ""       # animate: character image
+        self._animate_mode = "animation"
         self._server_ready = False
         self._server_launching = False   # True while start/stop script is running
         self._busy = False
-        self._model_source = "video"   # "video" or "image"
+        self._model_source = "video"   # "video", "image", or "animate"
         self.set_margin_top(12)
         self.set_margin_bottom(12)
         self.set_margin_start(12)
@@ -1538,7 +1551,7 @@ class ControlPanel(Gtk.Box):
         # Switches between Wan2.2 (video) and FLUX.1-dev (image) generation.
         self.append(self._section("Generation Source"))
         src_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
-        self._src_video_btn = Gtk.Button(label="🎬 Wan2.2 Video")
+        self._src_video_btn = Gtk.Button(label="🎬 Video")
         self._src_video_btn.add_css_class("source-btn")
         self._src_video_btn.add_css_class("source-btn-left")
         self._src_video_btn.add_css_class("source-btn-active")
@@ -1548,7 +1561,16 @@ class ControlPanel(Gtk.Box):
         )
         self._src_video_btn.connect("clicked", lambda _: self._set_source("video"))
         src_row.append(self._src_video_btn)
-        self._src_image_btn = Gtk.Button(label="🖼 FLUX Image")
+        self._src_animate_btn = Gtk.Button(label="💃 Animate")
+        self._src_animate_btn.add_css_class("source-btn")
+        self._src_animate_btn.add_css_class("source-btn-mid")
+        self._src_animate_btn.set_tooltip_text(
+            "Wan2.2-Animate-14B  ·  Character animation  ·  Video-to-video\n"
+            "Requires a motion video + character image"
+        )
+        self._src_animate_btn.connect("clicked", lambda _: self._set_source("animate"))
+        src_row.append(self._src_animate_btn)
+        self._src_image_btn = Gtk.Button(label="🖼 Image")
         self._src_image_btn.add_css_class("source-btn")
         self._src_image_btn.add_css_class("source-btn-right")
         self._src_image_btn.set_tooltip_text(
@@ -1745,6 +1767,64 @@ class ControlPanel(Gtk.Box):
         self._seed_row_widget = seed_row
         self.append(seed_row)
 
+        # ── Animate inputs ────────────────────────────────────────────────────
+        # Visible only when "animate" source is active.
+        self._animate_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        self._animate_box.set_visible(False)
+
+        self._animate_box.append(self._section("Motion Video"))
+        mv_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self._anim_video_lbl = Gtk.Label(label="none")
+        self._anim_video_lbl.add_css_class("muted")
+        self._anim_video_lbl.set_ellipsize(Pango.EllipsizeMode.START)
+        self._anim_video_lbl.set_hexpand(True)
+        self._anim_video_lbl.set_xalign(1)
+        self._anim_video_lbl.set_tooltip_text("Reference video supplying the motion pattern")
+        mv_row.append(self._anim_video_lbl)
+        anim_video_btn = Gtk.Button(label="Browse…")
+        anim_video_btn.set_tooltip_text("Pick an MP4 motion source video")
+        anim_video_btn.connect("clicked", self._pick_ref_video)
+        mv_row.append(anim_video_btn)
+        self._animate_box.append(mv_row)
+
+        self._animate_box.append(self._section("Character Image"))
+        ci_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self._anim_char_lbl = Gtk.Label(label="none")
+        self._anim_char_lbl.add_css_class("muted")
+        self._anim_char_lbl.set_ellipsize(Pango.EllipsizeMode.START)
+        self._anim_char_lbl.set_hexpand(True)
+        self._anim_char_lbl.set_xalign(1)
+        self._anim_char_lbl.set_tooltip_text("Character image to animate")
+        ci_row.append(self._anim_char_lbl)
+        anim_char_btn = Gtk.Button(label="Browse…")
+        anim_char_btn.set_tooltip_text("Pick a character image (PNG/JPG)")
+        anim_char_btn.connect("clicked", self._pick_ref_image)
+        ci_row.append(anim_char_btn)
+        self._animate_box.append(ci_row)
+
+        self._animate_box.append(self._section("Animation Mode"))
+        mode_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        self._anim_mode_anim_btn = Gtk.Button(label="🔄 Animation")
+        self._anim_mode_anim_btn.add_css_class("source-btn")
+        self._anim_mode_anim_btn.add_css_class("source-btn-left")
+        self._anim_mode_anim_btn.add_css_class("source-btn-active")
+        self._anim_mode_anim_btn.set_tooltip_text(
+            "Character mimics the motion from the reference video"
+        )
+        self._anim_mode_anim_btn.connect("clicked", lambda _: self._set_animate_mode("animation"))
+        mode_row.append(self._anim_mode_anim_btn)
+        self._anim_mode_repl_btn = Gtk.Button(label="🔀 Replacement")
+        self._anim_mode_repl_btn.add_css_class("source-btn")
+        self._anim_mode_repl_btn.add_css_class("source-btn-right")
+        self._anim_mode_repl_btn.set_tooltip_text(
+            "Character replaces the person in the reference video"
+        )
+        self._anim_mode_repl_btn.connect("clicked", lambda _: self._set_animate_mode("replacement"))
+        mode_row.append(self._anim_mode_repl_btn)
+        self._animate_box.append(mode_row)
+
+        self.append(self._animate_box)
+
         # ── Server control ─────────────────────────────────────────────────────
         # Status row: indicator label + Start + Stop buttons side by side.
         srv_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -1758,7 +1838,7 @@ class ControlPanel(Gtk.Box):
         self._server_start_btn.add_css_class("server-start-btn")
         self._server_start_btn.set_tooltip_text(
             "Start the inference server using the local launch script.\n"
-            "Video tab → start_wan.sh  ·  Image tab → start_flux.sh"
+            "Video → start_wan.sh  ·  Animate → start_animate.sh  ·  Image → start_flux.sh"
         )
         self._server_start_btn.set_sensitive(False)  # enabled once health check confirms server is offline
         self._server_start_btn.connect("clicked", self._on_start_server_clicked)
@@ -1833,43 +1913,60 @@ class ControlPanel(Gtk.Box):
     # ── Source toggle ──────────────────────────────────────────────────────────
 
     def _set_source(self, source: str) -> None:
-        """Switch between 'video' (Wan2.2) and 'image' (FLUX) generation sources."""
+        """Switch between 'video' (Wan2.2), 'animate' (Animate-14B), and 'image' (FLUX)."""
         if source == self._model_source:
             return
         self._model_source = source
         is_image = source == "image"
+        is_animate = source == "animate"
+        is_video = source == "video"
 
-        # Update toggle button visual state and title
+        # Update toggle button visual states
+        self._src_video_btn.remove_css_class("source-btn-active")
+        self._src_animate_btn.remove_css_class("source-btn-active")
+        self._src_image_btn.remove_css_class("source-btn-active")
         if is_image:
             self._src_image_btn.add_css_class("source-btn-active")
-            self._src_video_btn.remove_css_class("source-btn-active")
             self._title_lbl.set_label("TT IMAGE GENERATOR")
             self._source_desc_lbl.set_label("synchronous  ·  ~15–90 s  ·  1024×1024 JPEG")
+        elif is_animate:
+            self._src_animate_btn.add_css_class("source-btn-active")
+            self._title_lbl.set_label("TT ANIMATE GENERATOR")
+            self._source_desc_lbl.set_label("async job  ·  Animate-14B  ·  motion video + character")
         else:
             self._src_video_btn.add_css_class("source-btn-active")
-            self._src_image_btn.remove_css_class("source-btn-active")
             self._title_lbl.set_label("TT VIDEO GENERATOR")
             self._source_desc_lbl.set_label("async job  ·  ~3–10 min  ·  720p MP4")
 
-        # Update prompt placeholder to match the active medium
-        self._prompt_placeholder.set_label(
-            self._prompt_ph_text_image if is_image else self._prompt_ph_text_video
-        )
+        # Update prompt placeholder — prompt is optional/style-only for animate
+        if is_image:
+            self._prompt_placeholder.set_label(self._prompt_ph_text_image)
+        elif is_animate:
+            self._prompt_placeholder.set_label(
+                "Optional style guidance…\n\n"
+                "e.g. photorealistic, anime style, cinematic lighting\n"
+                "(leave blank to let the model decide)"
+            )
+        else:
+            self._prompt_placeholder.set_label(self._prompt_ph_text_video)
 
-        # Show guidance scale + hint for FLUX; hide for Wan2.2
+        # Show guidance scale only for FLUX image
         self._guidance_lbl.set_visible(is_image)
         self._guidance_spin.set_visible(is_image)
         self._guidance_hint_lbl.set_visible(is_image)
 
-        # Swap chips: video chips have motion/camera keywords; image chips focus
-        # on style, lighting, and composition (no "slow dolly in" for static images).
-        self._chips_scroll.set_child(self._make_chips_box(source))
+        # Swap chips: video/animate share motion vocabulary; image uses style chips
+        chip_source = "image" if is_image else "video"
+        self._chips_scroll.set_child(self._make_chips_box(chip_source))
 
-        # Hide seed image section for FLUX (text-to-image, no init image support)
-        self._seed_img_section.set_visible(not is_image)
-        self._seed_row_widget.set_visible(not is_image)
+        # Seed image: only relevant for video (Wan2.2 init image)
+        self._seed_img_section.set_visible(is_video)
+        self._seed_row_widget.set_visible(is_video)
 
-        # Adjust steps range and hint: FLUX min is 4, Wan2.2 min is 12
+        # Animate inputs: visible only in animate mode
+        self._animate_box.set_visible(is_animate)
+
+        # Adjust steps range: FLUX min is 4, others min is 12
         if is_image:
             self._steps_lbl.set_label("Steps (4–50):")
             self._steps_hint_lbl.set_label("sweet spot 20–30  ·  more = cleaner, slower")
@@ -2012,6 +2109,63 @@ class ControlPanel(Gtk.Box):
         parent.prepend(self._seed_img_widget)
         self._clear_seed_btn.set_sensitive(False)
 
+    # ── Animate file pickers ───────────────────────────────────────────────────
+
+    def _pick_ref_video(self, _btn) -> None:
+        dlg = Gtk.FileDialog()
+        dlg.set_title("Select Motion Video")
+        f = Gtk.FileFilter()
+        f.set_name("Videos")
+        for pat in ("*.mp4", "*.mov", "*.avi", "*.webm", "*.mkv"):
+            f.add_pattern(pat)
+        filters = Gio_ListStore_from_items([f])
+        dlg.set_filters(filters)
+        dlg.open(self.get_root(), None, self._ref_video_chosen)
+
+    def _ref_video_chosen(self, dlg, result) -> None:
+        try:
+            gfile = dlg.open_finish(result)
+        except Exception:
+            return
+        path = gfile.get_path()
+        if path:
+            self._ref_video_path = path
+            self._anim_video_lbl.set_label(Path(path).name)
+            self._anim_video_lbl.remove_css_class("muted")
+            self._anim_video_lbl.set_tooltip_text(path)
+
+    def _pick_ref_image(self, _btn) -> None:
+        dlg = Gtk.FileDialog()
+        dlg.set_title("Select Character Image")
+        f = Gtk.FileFilter()
+        f.set_name("Images")
+        for pat in ("*.png", "*.jpg", "*.jpeg", "*.webp", "*.bmp"):
+            f.add_pattern(pat)
+        filters = Gio_ListStore_from_items([f])
+        dlg.set_filters(filters)
+        dlg.open(self.get_root(), None, self._ref_image_chosen)
+
+    def _ref_image_chosen(self, dlg, result) -> None:
+        try:
+            gfile = dlg.open_finish(result)
+        except Exception:
+            return
+        path = gfile.get_path()
+        if path:
+            self._ref_char_path = path
+            self._anim_char_lbl.set_label(Path(path).name)
+            self._anim_char_lbl.remove_css_class("muted")
+            self._anim_char_lbl.set_tooltip_text(path)
+
+    def _set_animate_mode(self, mode: str) -> None:
+        self._animate_mode = mode
+        if mode == "animation":
+            self._anim_mode_anim_btn.add_css_class("source-btn-active")
+            self._anim_mode_repl_btn.remove_css_class("source-btn-active")
+        else:
+            self._anim_mode_repl_btn.add_css_class("source-btn-active")
+            self._anim_mode_anim_btn.remove_css_class("source-btn-active")
+
     # ── Chips helper ───────────────────────────────────────────────────────────
 
     def _make_chips_box(self, source: str) -> Gtk.Box:
@@ -2067,9 +2221,15 @@ class ControlPanel(Gtk.Box):
 
     def _on_action_clicked(self, _btn) -> None:
         """Single button: Generate when idle, Add to Queue when busy."""
-        prompt = self._get_prompt()
-        if not prompt:
-            return
+        if self._model_source == "animate":
+            # Prompt is optional for animate (style guidance only); video+image are required.
+            if not self._ref_video_path or not self._ref_char_path:
+                return
+            prompt = self._get_prompt()
+        else:
+            prompt = self._get_prompt()
+            if not prompt:
+                return
         args = (
             prompt,
             self._get_neg(),
@@ -2078,6 +2238,9 @@ class ControlPanel(Gtk.Box):
             self._seed_image_path,
             self._model_source,
             float(self._guidance_spin.get_value()),
+            self._ref_video_path,
+            self._ref_char_path,
+            self._animate_mode,
         )
         if self._busy:
             self._on_enqueue(*args)
@@ -2267,8 +2430,10 @@ class MainWindow(Gtk.ApplicationWindow):
             delete_cb=self._on_delete_card,
         )
         self._video_gallery = GalleryWidget(**shared_cbs, media_type="video")
+        self._animate_gallery = GalleryWidget(**shared_cbs, media_type="video")
         self._image_gallery = GalleryWidget(**shared_cbs, media_type="image")
         self._gallery_stack.add_named(self._video_gallery, "video")
+        self._gallery_stack.add_named(self._animate_gallery, "animate")
         self._gallery_stack.add_named(self._image_gallery, "image")
         self._gallery_stack.set_visible_child_name("video")
         gallery_wrap.append(self._gallery_stack)
@@ -2300,8 +2465,12 @@ class MainWindow(Gtk.ApplicationWindow):
         return self._gallery_for_type(self._controls.get_model_source())
 
     def _gallery_for_type(self, media_type: str) -> "GalleryWidget":
-        """Return the video or image gallery for the given media_type string."""
-        return self._image_gallery if media_type == "image" else self._video_gallery
+        """Return the gallery for the given media_type string."""
+        if media_type == "image":
+            return self._image_gallery
+        if media_type == "animate":
+            return self._animate_gallery
+        return self._video_gallery
 
     def _on_source_change(self, source: str) -> None:
         """Switch the gallery stack when the user toggles between video and image mode."""
@@ -2374,7 +2543,9 @@ class MainWindow(Gtk.ApplicationWindow):
     # ── Generation ─────────────────────────────────────────────────────────────
 
     def _on_generate(self, prompt, neg, steps, seed, seed_image_path="",
-                     model_source="video", guidance_scale=3.5) -> None:
+                     model_source="video", guidance_scale=3.5,
+                     ref_video_path="", ref_char_path="",
+                     animate_mode="animation") -> None:
         if self._worker and self._worker.is_alive():
             return
 
@@ -2395,6 +2566,18 @@ class MainWindow(Gtk.ApplicationWindow):
                 num_inference_steps=steps,
                 seed=seed,
                 guidance_scale=guidance_scale,
+            )
+        elif model_source == "animate":
+            self._set_status("Submitting Animate-14B job…")
+            gen = AnimateGenerationWorker(
+                client=self._client,
+                store=self._store,
+                reference_video_path=ref_video_path,
+                reference_image_path=ref_char_path,
+                prompt=prompt,
+                num_inference_steps=steps,
+                seed=seed,
+                animate_mode=animate_mode,
             )
         else:
             self._set_status("Submitting video generation job…")
@@ -2428,9 +2611,13 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def _on_start_server(self, model_source: str) -> None:
         """Launch the appropriate server script in a background thread, streaming output to the log panel."""
-        script_name = "start_flux.sh" if model_source == "image" else "start_wan.sh"
+        if model_source == "image":
+            script_name, label = "start_flux.sh", "FLUX image"
+        elif model_source == "animate":
+            script_name, label = "start_animate.sh", "Wan2.2-Animate"
+        else:
+            script_name, label = "start_wan.sh", "Wan2.2 video"
         script_path = str(Path(__file__).parent / script_name)
-        label = "FLUX image" if model_source == "image" else "Wan2.2 video"
 
         self._controls.set_server_launching(True, clear_log=True)
         self._controls.append_server_log(f"Starting {label} server ({script_name} --gui)…")
@@ -2503,9 +2690,12 @@ class MainWindow(Gtk.ApplicationWindow):
     # ── Queue ──────────────────────────────────────────────────────────────────
 
     def _on_enqueue(self, prompt, neg, steps, seed, seed_image_path,
-                    model_source="video", guidance_scale=3.5) -> None:
+                    model_source="video", guidance_scale=3.5,
+                    ref_video_path="", ref_char_path="",
+                    animate_mode="animation") -> None:
         self._queue.append(_QueueItem(prompt, neg, steps, seed, seed_image_path,
-                                      model_source, guidance_scale))
+                                      model_source, guidance_scale,
+                                      ref_video_path, ref_char_path, animate_mode))
         self._controls.update_queue_display(self._queue)
         self._controls.clear_prompt()   # ready for the next prompt immediately
         n = len(self._queue)
@@ -2528,7 +2718,8 @@ class MainWindow(Gtk.ApplicationWindow):
         self._set_status(f"Auto-starting next queued prompt{suffix}…")
         self._on_generate(item.prompt, item.negative_prompt,
                           item.steps, item.seed, item.seed_image_path,
-                          item.model_source, item.guidance_scale)
+                          item.model_source, item.guidance_scale,
+                          item.ref_video_path, item.ref_char_path, item.animate_mode)
         return True
 
     # ── Recovery ───────────────────────────────────────────────────────────────
