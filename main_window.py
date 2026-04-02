@@ -1541,6 +1541,8 @@ class ControlPanel(Gtk.Box):
         self._server_launching = False   # True while start/stop script is running
         self._busy = False
         self._model_source = "video"   # "video", "image", or "animate"
+        self._video_model: str = "wan2"   # "wan2" | "mochi"
+        self._image_model: str = "flux"   # "flux" | future models
         self.set_margin_top(12)
         self.set_margin_bottom(12)
         self.set_margin_start(12)
@@ -1597,6 +1599,53 @@ class ControlPanel(Gtk.Box):
         self._src_image_btn.connect("clicked", lambda _: self._set_source("image"))
         src_row.append(self._src_image_btn)
         self.append(src_row)
+
+        # ── Video model selector ──────────────────────────────────────────────
+        # Visible only when "video" source is active. Uses same source-btn style.
+        self._model_sel_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+
+        self._mdl_wan2_btn = Gtk.Button(label="🎬 Wan2.2")
+        self._mdl_wan2_btn.add_css_class("source-btn")
+        self._mdl_wan2_btn.add_css_class("source-btn-left")
+        self._mdl_wan2_btn.add_css_class("source-btn-active")
+        self._mdl_wan2_btn.set_tooltip_text(
+            "Wan2.2-T2V-A14B  ·  720p MP4  ·  ~3–10 min\n"
+            "Launches start_wan.sh"
+        )
+        self._mdl_wan2_btn.connect("clicked", lambda _: self._set_model("wan2"))
+        self._model_sel_row.append(self._mdl_wan2_btn)
+
+        self._mdl_mochi_btn = Gtk.Button(label="🎥 Mochi-1")
+        self._mdl_mochi_btn.add_css_class("source-btn")
+        self._mdl_mochi_btn.add_css_class("source-btn-right")
+        self._mdl_mochi_btn.set_tooltip_text(
+            "Mochi-1  ·  480×848  ·  168 frames  ·  ~5–15 min\n"
+            "Launches start_mochi.sh"
+        )
+        self._mdl_mochi_btn.connect("clicked", lambda _: self._set_model("mochi"))
+        self._model_sel_row.append(self._mdl_mochi_btn)
+
+        # ── Image model selector ──────────────────────────────────────────────
+        # Single button for now; hidden until source == "image".
+        self._img_model_sel_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+
+        self._mdl_flux_btn = Gtk.Button(label="🖼 FLUX.1-dev")
+        self._mdl_flux_btn.add_css_class("source-btn")
+        self._mdl_flux_btn.add_css_class("source-btn-left")
+        self._mdl_flux_btn.add_css_class("source-btn-right")
+        self._mdl_flux_btn.add_css_class("source-btn-active")
+        self._mdl_flux_btn.set_tooltip_text(
+            "FLUX.1-dev  ·  1024×1024 JPEG  ·  ~15–90 s\n"
+            "Launches start_flux.sh"
+        )
+        self._img_model_sel_row.append(self._mdl_flux_btn)
+
+        # Video selector visible by default (video is default source)
+        self._model_sel_row.set_visible(True)
+        self._img_model_sel_row.set_visible(False)
+
+        self.append(self._model_sel_row)
+        self.append(self._img_model_sel_row)
 
         # One-line model spec shown below the toggle — updates on source change
         self._source_desc_lbl = Gtk.Label(
@@ -1983,6 +2032,11 @@ class ControlPanel(Gtk.Box):
         # Animate inputs: visible only in animate mode
         self._animate_box.set_visible(is_animate)
 
+        # Model selector rows: video selector shown for video source,
+        # image selector shown for image source, neither for animate.
+        self._model_sel_row.set_visible(is_video)
+        self._img_model_sel_row.set_visible(is_image)
+
         # Adjust steps range: FLUX min is 4, others min is 12
         if is_image:
             self._steps_lbl.set_label("Steps (4–50):")
@@ -2003,8 +2057,46 @@ class ControlPanel(Gtk.Box):
         # only the cards that match the newly selected generation mode.
         self._on_source_change(source)
 
+    def _set_model(self, model: str) -> None:
+        """
+        Switch the active model within the current source category.
+        Updates button visual state, description label, and Start button tooltip.
+        """
+        if self._model_source == "video":
+            self._video_model = model
+            self._mdl_wan2_btn.remove_css_class("source-btn-active")
+            self._mdl_mochi_btn.remove_css_class("source-btn-active")
+            if model == "mochi":
+                self._mdl_mochi_btn.add_css_class("source-btn-active")
+                self._source_desc_lbl.set_label(
+                    "async job  ·  Mochi-1  ·  ~5–15 min  ·  480×848 168-frame"
+                )
+                self._server_start_btn.set_tooltip_text(
+                    "Start the Mochi-1 inference server.\n"
+                    "Video (Mochi-1) → start_mochi.sh"
+                )
+            else:
+                self._mdl_wan2_btn.add_css_class("source-btn-active")
+                self._source_desc_lbl.set_label(
+                    "async job  ·  Wan2.2-T2V  ·  ~3–10 min  ·  720p MP4"
+                )
+                self._server_start_btn.set_tooltip_text(
+                    "Start the inference server using the local launch script.\n"
+                    "Video (Wan2.2) → start_wan.sh  ·  Image → start_flux.sh"
+                )
+        elif self._model_source == "image":
+            self._image_model = model
+
     def get_model_source(self) -> str:
         return self._model_source
+
+    def get_video_model(self) -> str:
+        """Return the currently selected video model key ('wan2' or 'mochi')."""
+        return self._video_model
+
+    def get_image_model(self) -> str:
+        """Return the currently selected image model key ('flux' or future)."""
+        return self._image_model
 
     def set_server_ready(self, ready: bool) -> None:
         self._server_ready = ready
