@@ -198,6 +198,8 @@ class AttractorWindow(Gtk.Window):
         self._gen_stop = threading.Event()
         self._paused = False
         self._pending_advance_source: int | None = None  # GLib source id
+        self._watched_stream = None          # stream we connected notify::ended to
+        self._stream_handler_id: int | None = None  # handler ID so we can disconnect
 
         # Load CSS (uses @define-color variables already loaded by main_window.py)
         provider = Gtk.CssProvider()
@@ -452,22 +454,40 @@ class AttractorWindow(Gtk.Window):
         Images use a timer (avg_video_duration seconds).
         Videos connect to the stream's notify::ended signal.
         """
+        # Cancel any pending timer
         if self._pending_advance_source is not None:
             GLib.source_remove(self._pending_advance_source)
             self._pending_advance_source = None
+
+        # Disconnect previous notify::ended handler to prevent accumulation
+        if self._watched_stream is not None and self._stream_handler_id is not None:
+            try:
+                self._watched_stream.disconnect(self._stream_handler_id)
+            except Exception:
+                pass
+        self._watched_stream = None
+        self._stream_handler_id = None
 
         if getattr(record, "media_type", "video") == "image":
             ms = int(self._pool.avg_video_duration * 1000)
             self._pending_advance_source = GLib.timeout_add(ms, self._on_advance_timer)
         else:
-            stream = self._get_current_video_stream()
-            if stream:
-                stream.connect("notify::ended", self._on_video_ended)
-            else:
-                # Stream not ready yet — retry in 500 ms
-                self._pending_advance_source = GLib.timeout_add(
-                    500, self._retry_connect_stream
-                )
+            self._connect_video_ended()
+
+    def _connect_video_ended(self) -> None:
+        """Connect notify::ended to the current video stream, or retry in 500 ms."""
+        stream = self._get_current_video_stream()
+        if stream:
+            self._watched_stream = stream
+            self._stream_handler_id = stream.connect("notify::ended", self._on_video_ended)
+            # If the video already ended while we were waiting, advance now
+            if stream.get_ended():
+                GLib.idle_add(self._advance)
+        else:
+            # Stream not initialised yet — retry
+            self._pending_advance_source = GLib.timeout_add(
+                500, self._retry_connect_stream
+            )
 
     def _on_advance_timer(self) -> bool:
         """GLib timeout callback for image dwell time. Advances to next item."""
@@ -476,24 +496,14 @@ class AttractorWindow(Gtk.Window):
         return False  # one-shot
 
     def _on_video_ended(self, stream, _param) -> None:
-        """Called when a video stream signals it has ended. Advances to next item."""
+        """Called when the active video stream's ended property changes."""
         if stream.get_ended():
             self._advance()
 
     def _retry_connect_stream(self) -> bool:
-        """
-        Fallback: retry connecting the notify::ended signal if the GStreamer
-        stream was not ready when _schedule_advance() was called.
-        """
+        """Fallback: GStreamer stream not ready at _schedule_advance time; try again."""
         self._pending_advance_source = None
-        stream = self._get_current_video_stream()
-        if stream:
-            stream.connect("notify::ended", self._on_video_ended)
-        else:
-            # Still not ready — retry again in 500 ms
-            self._pending_advance_source = GLib.timeout_add(
-                500, self._retry_connect_stream
-            )
+        self._connect_video_ended()
         return False
 
     # ── Generation loop ───────────────────────────────────────────────────

@@ -3478,7 +3478,7 @@ class MainWindow(Gtk.ApplicationWindow):
         args = (prompt, neg, steps, seed, seed_image_path,
                 model_source, guidance_scale, ref_video_path,
                 ref_char_path, animate_mode, model_id)
-        if self._busy:
+        if self._worker and self._worker.is_alive():
             self._on_enqueue(*args)
         else:
             self._on_generate(*args)
