@@ -2832,6 +2832,7 @@ class MainWindow(Gtk.ApplicationWindow):
         # Track which gallery owns the current pending card (set in _on_generate,
         # used in _on_finished/_on_error to update the right gallery).
         self._gen_gallery = None
+        self._auto_tab_switched = False  # True after first model detection auto-switch
 
         self._build_ui()
         self._load_history()
@@ -3003,13 +3004,24 @@ class MainWindow(Gtk.ApplicationWindow):
         """Runs on background thread. Posts UI updates via GLib.idle_add."""
         while not self._health_stop.is_set():
             ready = self._client.health_check()
+            running_model: "str | None" = None
+            if ready:
+                running_model = self._client.detect_running_model()
             # THREADING: must not touch GTK widgets here — post to main thread
-            GLib.idle_add(self._on_health_result, ready)
+            GLib.idle_add(self._on_health_result, ready, running_model)
             self._health_stop.wait(10.0)
 
-    def _on_health_result(self, ready: bool) -> bool:
-        # Runs on main thread (called by GLib.idle_add).
-        self._controls.set_server_state(ready, None)
+    def _on_health_result(self, ready: bool, running_model: "str | None") -> bool:
+        """Runs on main thread (called by GLib.idle_add)."""
+        # Auto-switch source tab on first model detection — once only.
+        if running_model and not self._auto_tab_switched:
+            source = _MODEL_TO_SOURCE.get(running_model)
+            if source and source != self._controls.get_model_source():
+                self._controls.switch_to_source(source)
+            self._auto_tab_switched = True
+
+        self._controls.set_server_state(ready, running_model)
+
         if ready and not (self._worker_gen and self._worker_gen._running()):
             self._set_status("Server ready — enter a prompt and click Generate")
         return False  # don't repeat (one-shot idle callback)
