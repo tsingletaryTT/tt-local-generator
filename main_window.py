@@ -274,13 +274,15 @@ scrollbar slider:hover {
     border-radius: 0 4px 4px 0;
     border-left-width: 0;
 }
-.source-btn-active {
+.source-btn-active,
+.source-btn:checked {
     background-color: @tt_accent;
     color: @tt_bg_darkest;
     border-color: @tt_accent;
     font-weight: bold;
 }
-.source-btn-active:hover {
+.source-btn-active:hover,
+.source-btn:checked:hover {
     background-color: @tt_accent_light;
 }
 .server-start-btn {
@@ -1634,33 +1636,39 @@ class ControlPanel(Gtk.Box):
         # Switches between Wan2.2 (video) and FLUX.1-dev (image) generation.
         self.append(self._section("Generation Source"))
         src_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
-        self._src_video_btn = Gtk.Button(label="🎬 Video")
+        self._src_video_btn = Gtk.ToggleButton(label="🎬 Video")
         self._src_video_btn.add_css_class("source-btn")
         self._src_video_btn.add_css_class("source-btn-left")
-        self._src_video_btn.add_css_class("source-btn-active")
         self._src_video_btn.set_tooltip_text(
             "Wan2.2-T2V-A14B  ·  Async job-based  ·  5-second 720p MP4\n"
             "Supports seed images for motion reference"
         )
-        self._src_video_btn.connect("clicked", lambda _: self._set_source("video"))
-        src_row.append(self._src_video_btn)
-        self._src_animate_btn = Gtk.Button(label="💃 Animate")
+        self._src_animate_btn = Gtk.ToggleButton(label="💃 Animate")
         self._src_animate_btn.add_css_class("source-btn")
         self._src_animate_btn.add_css_class("source-btn-mid")
         self._src_animate_btn.set_tooltip_text(
             "Wan2.2-Animate-14B  ·  Character animation  ·  Video-to-video\n"
             "Requires a motion video + character image"
         )
-        self._src_animate_btn.connect("clicked", lambda _: self._set_source("animate"))
-        src_row.append(self._src_animate_btn)
-        self._src_image_btn = Gtk.Button(label="🖼 Image")
+        self._src_image_btn = Gtk.ToggleButton(label="🖼 Image")
         self._src_image_btn.add_css_class("source-btn")
         self._src_image_btn.add_css_class("source-btn-right")
         self._src_image_btn.set_tooltip_text(
             "FLUX.1-dev  ·  Synchronous request  ·  ~1024×1024 JPEG\n"
             "Blocks until image is ready (~15–90 s)"
         )
-        self._src_image_btn.connect("clicked", lambda _: self._set_source("image"))
+        # Source button group — only one can be active at a time.
+        # set_group() links animate and image to the video button as group leader.
+        self._src_animate_btn.set_group(self._src_video_btn)
+        self._src_image_btn.set_group(self._src_video_btn)
+        self._src_video_btn.set_active(True)
+        # Guard with b.get_active() so the callback only fires when a button is
+        # turned ON (not when it is deactivated by another group member being clicked).
+        self._src_video_btn.connect("toggled", lambda b: b.get_active() and self._set_source("video"))
+        self._src_animate_btn.connect("toggled", lambda b: b.get_active() and self._set_source("animate"))
+        self._src_image_btn.connect("toggled", lambda b: b.get_active() and self._set_source("image"))
+        src_row.append(self._src_video_btn)
+        src_row.append(self._src_animate_btn)
         src_row.append(self._src_image_btn)
         self.append(src_row)
 
@@ -1668,25 +1676,26 @@ class ControlPanel(Gtk.Box):
         # Visible only when "video" source is active. Uses same source-btn style.
         self._model_sel_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
 
-        self._mdl_wan2_btn = Gtk.Button(label="🎬 Wan2.2")
+        self._mdl_wan2_btn = Gtk.ToggleButton(label="🎬 Wan2.2")
         self._mdl_wan2_btn.add_css_class("source-btn")
         self._mdl_wan2_btn.add_css_class("source-btn-left")
-        self._mdl_wan2_btn.add_css_class("source-btn-active")
         self._mdl_wan2_btn.set_tooltip_text(
             "Wan2.2-T2V-A14B  ·  720p MP4  ·  ~3–10 min\n"
             "Launches start_wan.sh"
         )
-        self._mdl_wan2_btn.connect("clicked", lambda _: self._set_model("wan2"))
-        self._model_sel_row.append(self._mdl_wan2_btn)
-
-        self._mdl_mochi_btn = Gtk.Button(label="🎥 Mochi-1")
+        self._mdl_mochi_btn = Gtk.ToggleButton(label="🎥 Mochi-1")
         self._mdl_mochi_btn.add_css_class("source-btn")
         self._mdl_mochi_btn.add_css_class("source-btn-right")
         self._mdl_mochi_btn.set_tooltip_text(
             "Mochi-1  ·  480×848  ·  168 frames  ·  ~5–15 min\n"
             "Launches start_mochi.sh"
         )
-        self._mdl_mochi_btn.connect("clicked", lambda _: self._set_model("mochi"))
+        # Video model button group — only one model active at a time.
+        self._mdl_mochi_btn.set_group(self._mdl_wan2_btn)
+        self._mdl_wan2_btn.set_active(True)
+        self._mdl_wan2_btn.connect("toggled", lambda b: b.get_active() and self._set_model("wan2"))
+        self._mdl_mochi_btn.connect("toggled", lambda b: b.get_active() and self._set_model("mochi"))
+        self._model_sel_row.append(self._mdl_wan2_btn)
         self._model_sel_row.append(self._mdl_mochi_btn)
 
         # ── Image model selector ──────────────────────────────────────────────
@@ -1946,22 +1955,24 @@ class ControlPanel(Gtk.Box):
 
         self._animate_box.append(self._section("Animation Mode"))
         mode_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
-        self._anim_mode_anim_btn = Gtk.Button(label="🔄 Animation")
+        self._anim_mode_anim_btn = Gtk.ToggleButton(label="🔄 Animation")
         self._anim_mode_anim_btn.add_css_class("source-btn")
         self._anim_mode_anim_btn.add_css_class("source-btn-left")
-        self._anim_mode_anim_btn.add_css_class("source-btn-active")
         self._anim_mode_anim_btn.set_tooltip_text(
             "Character mimics the motion from the reference video"
         )
-        self._anim_mode_anim_btn.connect("clicked", lambda _: self._set_animate_mode("animation"))
-        mode_row.append(self._anim_mode_anim_btn)
-        self._anim_mode_repl_btn = Gtk.Button(label="🔀 Replacement")
+        self._anim_mode_repl_btn = Gtk.ToggleButton(label="🔀 Replacement")
         self._anim_mode_repl_btn.add_css_class("source-btn")
         self._anim_mode_repl_btn.add_css_class("source-btn-right")
         self._anim_mode_repl_btn.set_tooltip_text(
             "Character replaces the person in the reference video"
         )
-        self._anim_mode_repl_btn.connect("clicked", lambda _: self._set_animate_mode("replacement"))
+        # Animate mode button group — only one mode active at a time.
+        self._anim_mode_repl_btn.set_group(self._anim_mode_anim_btn)
+        self._anim_mode_anim_btn.set_active(True)
+        self._anim_mode_anim_btn.connect("toggled", lambda b: b.get_active() and self._set_animate_mode("animation"))
+        self._anim_mode_repl_btn.connect("toggled", lambda b: b.get_active() and self._set_animate_mode("replacement"))
+        mode_row.append(self._anim_mode_anim_btn)
         mode_row.append(self._anim_mode_repl_btn)
         self._animate_box.append(mode_row)
 
@@ -2063,24 +2074,18 @@ class ControlPanel(Gtk.Box):
         is_animate = source == "animate"
         is_video = source == "video"
 
-        # Update toggle button visual states
-        self._src_video_btn.remove_css_class("source-btn-active")
-        self._src_animate_btn.remove_css_class("source-btn-active")
-        self._src_image_btn.remove_css_class("source-btn-active")
+        # Active state is handled automatically by the ToggleButton group (:checked CSS).
         if is_image:
-            self._src_image_btn.add_css_class("source-btn-active")
             self._title_lbl.set_label("TT IMAGE GENERATOR")
             self._source_desc_lbl.set_label(
                 "synchronous  ·  FLUX.1-dev  ·  ~15–90 s  ·  1024×1024 JPEG"
             )
         elif is_animate:
-            self._src_animate_btn.add_css_class("source-btn-active")
             self._title_lbl.set_label("TT ANIMATE GENERATOR")
             self._source_desc_lbl.set_label(
                 "async job  ·  Animate-14B  ·  motion video + character"
             )
         else:
-            self._src_video_btn.add_css_class("source-btn-active")
             self._title_lbl.set_label("TT VIDEO GENERATOR")
             if self._video_model == "mochi":
                 self._source_desc_lbl.set_label(
@@ -2151,10 +2156,8 @@ class ControlPanel(Gtk.Box):
         """
         if self._model_source == "video":
             self._video_model = model
-            self._mdl_wan2_btn.remove_css_class("source-btn-active")
-            self._mdl_mochi_btn.remove_css_class("source-btn-active")
+            # Active state handled by ToggleButton group (:checked CSS); no manual CSS needed.
             if model == "mochi":
-                self._mdl_mochi_btn.add_css_class("source-btn-active")
                 self._source_desc_lbl.set_label(
                     "async job  ·  Mochi-1  ·  ~5–15 min  ·  480×848 168-frame"
                 )
@@ -2163,7 +2166,6 @@ class ControlPanel(Gtk.Box):
                     "Video (Mochi-1) → start_mochi.sh"
                 )
             else:
-                self._mdl_wan2_btn.add_css_class("source-btn-active")
                 self._source_desc_lbl.set_label(
                     "async job  ·  Wan2.2-T2V  ·  ~3–10 min  ·  720p MP4"
                 )
@@ -2354,13 +2356,8 @@ class ControlPanel(Gtk.Box):
             self._anim_char_lbl.set_tooltip_text(path)
 
     def _set_animate_mode(self, mode: str) -> None:
+        # Active state handled by ToggleButton group (:checked CSS); no manual CSS needed.
         self._animate_mode = mode
-        if mode == "animation":
-            self._anim_mode_anim_btn.add_css_class("source-btn-active")
-            self._anim_mode_repl_btn.remove_css_class("source-btn-active")
-        else:
-            self._anim_mode_repl_btn.add_css_class("source-btn-active")
-            self._anim_mode_anim_btn.remove_css_class("source-btn-active")
 
     # ── Chips helper ───────────────────────────────────────────────────────────
 
