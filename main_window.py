@@ -598,6 +598,13 @@ class GenerationCard(Gtk.Frame):
         badge.add_css_class(badge_css)
         meta.append(badge)
 
+        # Model attribution badge — omitted for legacy records with no model field
+        model_display = _MODEL_DISPLAY.get(self._record.model, "")
+        if model_display:
+            model_badge = Gtk.Label(label=model_display)
+            model_badge.add_css_class("type-badge-model")
+            meta.append(model_badge)
+
         time_lbl = Gtk.Label(label=self._record.display_time)
         time_lbl.add_css_class("muted")
         dur_text = _fmt_duration(self._record.duration_s) if self._record.duration_s else ""
@@ -889,7 +896,8 @@ class DetailPanel(Gtk.ScrolledWindow):
 
         rows = [
             ("Date",         date_str),
-            ("Type",         "Image (FLUX)" if record.media_type == "image" else "Video (Wan2.2)"),
+            ("Model",        record.model if record.model else "unknown"),
+            ("Type",         "Image" if record.media_type == "image" else "Video"),
             ("Steps",        str(record.num_inference_steps)),
         ]
         if record.media_type == "image" and record.guidance_scale:
@@ -901,6 +909,17 @@ class DetailPanel(Gtk.ScrolledWindow):
             ("Size",         size_str),
             ("Job ID",       record.id),
         ]
+
+        # Append any extra metadata returned by the server, skipping fields
+        # already shown above or too large/noisy to display.
+        _SKIP_META_KEYS = frozenset({
+            "status", "error", "id", "prompt", "negative_prompt",
+            "num_inference_steps", "seed", "request_parameters", "guidance_scale",
+        })
+        for k, v in record.extra_meta.items():
+            if k in _SKIP_META_KEYS or v is None or not str(v).strip():
+                continue
+            rows.append((k.replace("_", " ").title(), str(v)))
         for i, (key, val) in enumerate(rows):
             key_lbl = Gtk.Label(label=key)
             key_lbl.set_xalign(1)
