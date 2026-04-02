@@ -158,6 +158,12 @@ class GenerationWorker:
 
             if status == "completed":
                 server_meta = _safe_meta(data)
+                # Prefer the server-reported model over the locally-set default.
+                # This corrects attribution for recovered jobs (which are created
+                # with a generic default) and for any server that reports its
+                # own model identifier.
+                if data.get("model"):
+                    self._model = data["model"]
                 break
             if status in ("failed", "cancelled"):
                 on_error(f"Job {status}: {err or 'no details'}")

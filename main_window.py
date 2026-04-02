@@ -424,7 +424,7 @@ _MODEL_DISPLAY: dict = {
 # Keys to skip when rendering record.extra_meta in the detail panel — these
 # fields are either shown elsewhere in the panel or too noisy to display.
 _SKIP_META_KEYS: frozenset = frozenset({
-    "status", "error", "id", "prompt", "negative_prompt",
+    "status", "error", "id", "model", "prompt", "negative_prompt",
     "num_inference_steps", "seed", "request_parameters", "guidance_scale",
 })
 
@@ -2996,7 +2996,8 @@ class MainWindow(Gtk.ApplicationWindow):
             self._attach_recovery_job(job)
 
     def _attach_recovery_job(self, job: dict) -> None:
-        # Recovery jobs are video jobs (Wan2.2); route to the video gallery.
+        # Recovery jobs are video jobs; route to the video gallery.
+        # Model attribution is determined from the server's completed-job response.
         self._gen_gallery = self._video_gallery
         pending = self._video_gallery.add_pending_card()
         pending.update_status(f"Recovering {job['id'][:8]}… ({job['status']})")
@@ -3009,6 +3010,7 @@ class MainWindow(Gtk.ApplicationWindow):
             negative_prompt=job["negative_prompt"],
             num_inference_steps=job["steps"],
             seed=job["seed"],
+            model="",  # unknown at recovery time; server response will set it
         )
         gen._job_id_override = job["id"]
         self._worker_gen = gen
