@@ -196,7 +196,8 @@ class AttractorWindow(Gtk.Window):
         self._on_enqueue = on_enqueue
         self._get_queue_depth = get_queue_depth
         self._get_is_generating = get_is_generating
-        self._pool = AttractorPool(records)
+        video_records = [r for r in records if getattr(r, "media_type", "video") != "image"]
+        self._pool = AttractorPool(video_records)
         self._gen_stop = threading.Event()
         self._paused = False
         self._pending_advance_source: int | None = None  # GLib source id
@@ -603,6 +604,8 @@ class AttractorWindow(Gtk.Window):
         If the pool was empty when this window was opened (no media yet),
         also starts playback now that the first item has arrived.
         """
+        if getattr(record, "media_type", "video") == "image":
+            return  # images excluded from attractor playback
         was_empty = self._pool.size == 0
         self._pool.add_record(record)
         self._pool_lbl.set_label(f"🎬  pool: {self._pool.size}")
