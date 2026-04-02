@@ -3072,6 +3072,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self._gen_gallery = None
         self._auto_tab_switched = False  # True after first model detection auto-switch
         self._pg_stop: "threading.Event | None" = None  # set when prompt gen poll starts
+        self._log_tail_stop: "threading.Event | None" = None  # set to stop server log tail
         self._prompt_gen_system_prompt: str = self._load_prompt_gen_system()
 
         self._build_ui()
@@ -3265,8 +3266,13 @@ class MainWindow(Gtk.ApplicationWindow):
 
         self._controls.set_server_state(ready, running_model)
 
-        if ready and not (self._worker_gen and self._worker_gen._running()):
-            self._set_status("Server ready — enter a prompt and click Generate")
+        if ready:
+            # Stop tailing the Docker log — server is confirmed up
+            if self._log_tail_stop:
+                self._log_tail_stop.set()
+                self._log_tail_stop = None
+            if not (self._worker_gen and self._worker_gen._running()):
+                self._set_status("Server ready — enter a prompt and click Generate")
         return False  # don't repeat (one-shot idle callback)
 
     def _load_prompt_gen_system(self) -> str:
@@ -3457,8 +3463,14 @@ class MainWindow(Gtk.ApplicationWindow):
                     stdin=subprocess.DEVNULL,
                 )
                 self._server_proc = proc
+                _detected_log_file: "str | None" = None
                 for line in proc.stdout:
-                    GLib.idle_add(self._controls.append_server_log, line.rstrip())
+                    stripped = line.rstrip()
+                    GLib.idle_add(self._controls.append_server_log, stripped)
+                    # The start script prints "Log file: /path/to/workflow.log" just
+                    # before it exits in --gui mode.  Capture it so we can tail it.
+                    if stripped.startswith("Log file: "):
+                        _detected_log_file = stripped[len("Log file: "):]
                 proc.wait()
                 if proc.returncode != 0:
                     GLib.idle_add(self._controls.append_server_log,
@@ -3469,6 +3481,10 @@ class MainWindow(Gtk.ApplicationWindow):
                     GLib.idle_add(self._set_status,
                                   f"{label} server started — waiting for health check…")
                     # Leave the log panel open; set_server_state(True, ...) will collapse it.
+                    # If the script handed off to a Docker log file, tail it so the user
+                    # can see server startup progress without leaving the app.
+                    if _detected_log_file:
+                        GLib.idle_add(self._start_log_tail, _detected_log_file)
             except Exception as e:
                 GLib.idle_add(self._controls.append_server_log, f"Error: {e}")
                 GLib.idle_add(self._set_status, f"Server start error: {e}")
@@ -3478,8 +3494,52 @@ class MainWindow(Gtk.ApplicationWindow):
 
         threading.Thread(target=run, daemon=True).start()
 
+    def _start_log_tail(self, log_path: str) -> None:
+        """
+        Start a background thread that tails log_path and appends new lines to the
+        server log panel.
+
+        Called after the start script exits and hands off to the Docker log file.
+        The tail stops when the health check confirms the server is ready (via
+        _on_health_result setting self._log_tail_stop), or when the server is stopped.
+        """
+        # Cancel any previous tail still running (e.g., restart after stop)
+        if self._log_tail_stop:
+            self._log_tail_stop.set()
+
+        stop = threading.Event()
+        self._log_tail_stop = stop
+
+        # Show a visual separator in the log panel so the user knows we switched sources
+        GLib.idle_add(
+            self._controls.append_server_log,
+            f"─── tailing {log_path.split('/')[-1]} ───",
+        )
+
+        def tail():
+            try:
+                with open(log_path, encoding="utf-8", errors="replace") as f:
+                    # Seek to current end — skip lines the script already emitted
+                    f.seek(0, 2)
+                    while not stop.wait(0.5):
+                        line = f.readline()
+                        if line:
+                            GLib.idle_add(
+                                self._controls.append_server_log, line.rstrip()
+                            )
+            except OSError as e:
+                GLib.idle_add(
+                    self._controls.append_server_log, f"[log tail error: {e}]"
+                )
+
+        threading.Thread(target=tail, daemon=True).start()
+
     def _on_stop_server(self) -> None:
         """Run the stop command (via start_wan.sh --stop) in a background thread."""
+        # Stop any active log tail before clearing the log panel
+        if self._log_tail_stop:
+            self._log_tail_stop.set()
+            self._log_tail_stop = None
         # Both video and image use the same Docker image, so either script can stop it.
         script_path = str(Path(__file__).parent / "start_wan.sh")
 
@@ -3682,6 +3742,8 @@ class MainWindow(Gtk.ApplicationWindow):
         self._health_stop.set()
         if self._pg_stop:
             self._pg_stop.set()
+        if self._log_tail_stop:
+            self._log_tail_stop.set()
         if self._worker_gen:
             self._worker_gen.cancel()
         if self._server_proc and self._server_proc.poll() is None:
