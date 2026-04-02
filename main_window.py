@@ -2222,7 +2222,12 @@ class ControlPanel(Gtk.Box):
         # Animate inputs — visible only in animate mode, positioned below chips.
         # Appended here (after construction) so self._animate_box is ready.
         self.append(self._animate_box)
-        self.append(self._adv_hdr_btn)     # accordion header — after animate inputs
+
+        # ── Pinned footer — always visible, NOT inside the scroll ─────────────
+        # MainWindow places self._footer_box below ctrl_scroll so these widgets
+        # remain visible regardless of how short the window is.
+        self._footer_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self._footer_box.append(self._adv_hdr_btn)  # accordion header
 
         # ── Accordion body — neg prompt, params, seed image ───────────────────
         # adv_body is the content revealed when the accordion header is clicked.
@@ -2238,7 +2243,7 @@ class ControlPanel(Gtk.Box):
         adv_body.append(self._seed_img_section)
         adv_body.append(seed_row)
         self._adv_revealer.set_child(adv_body)
-        self.append(self._adv_revealer)
+        self._footer_box.append(self._adv_revealer)
 
         # Connect spinbuttons to update summary on value change
         self._steps_spin.connect("value-changed", lambda _: self._update_adv_summary())
@@ -2301,7 +2306,7 @@ class ControlPanel(Gtk.Box):
         btn_col.append(self._server_switch_btn)
 
         self._server_status_box.append(btn_col)
-        self.append(self._server_status_box)
+        self._footer_box.append(self._server_status_box)
 
         # Collapsible log area — shown while a start/stop operation is in progress.
         self._srv_log_revealer = Gtk.Revealer()
@@ -2319,32 +2324,33 @@ class ControlPanel(Gtk.Box):
         srv_log_scroll.set_child(srv_log_view)
         self._srv_log_scroll = srv_log_scroll
         self._srv_log_revealer.set_child(srv_log_scroll)
-        self.append(self._srv_log_revealer)
-
-        # Push buttons to bottom
-        spacer = Gtk.Box()
-        spacer.set_vexpand(True)
-        self.append(spacer)
+        self._footer_box.append(self._srv_log_revealer)
 
         # ── Buttons ────────────────────────────────────────────────────────────
         # Single action button: "Generate" when idle, "+ Add to Queue" when busy.
         self._gen_btn = Gtk.Button(label="Generate")
         self._gen_btn.add_css_class("generate-btn")
+        self._gen_btn.set_margin_top(6)
         self._gen_btn.set_sensitive(False)
         self._gen_btn.connect("clicked", self._on_action_clicked)
-        self.append(self._gen_btn)
+        self._footer_box.append(self._gen_btn)
 
         self._cancel_btn = Gtk.Button(label="✕ Cancel")
         self._cancel_btn.add_css_class("cancel-btn")
         self._cancel_btn.set_visible(False)
         self._cancel_btn.connect("clicked", lambda _: self._on_cancel())
-        self.append(self._cancel_btn)
+        self._footer_box.append(self._cancel_btn)
 
         self._recover_btn = Gtk.Button(label="⟳ Recover Jobs")
         self._recover_btn.set_tooltip_text("Discover server jobs not in local history")
         self._recover_btn.set_sensitive(False)
         self._recover_btn.connect("clicked", lambda _: self._on_recover())
-        self.append(self._recover_btn)
+        self._footer_box.append(self._recover_btn)
+
+    @property
+    def footer_box(self) -> Gtk.Box:
+        """Pinned footer — MainWindow places this below ctrl_scroll."""
+        return self._footer_box
 
     # ── State ──────────────────────────────────────────────────────────────────
 
@@ -3145,12 +3151,19 @@ class MainWindow(Gtk.ApplicationWindow):
             on_start_prompt_gen=self._on_start_prompt_gen,
             on_inspire=self._on_inspire,
         )
-        # Wrap the control panel in a ScrolledWindow so it scrolls when the
-        # window is too short to show everything (chips, advanced settings, etc.)
+        # Left pane: scrollable content area on top, pinned footer below.
+        # The footer (Advanced settings + Server status + action buttons) stays
+        # visible at all times; chips/prompt/toggles scroll when the window is short.
         ctrl_scroll = Gtk.ScrolledWindow()
         ctrl_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        ctrl_scroll.set_vexpand(True)
         ctrl_scroll.set_child(self._controls)
-        outer_paned.set_start_child(ctrl_scroll)
+
+        ctrl_wrapper = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        ctrl_wrapper.append(ctrl_scroll)
+        ctrl_wrapper.append(self._controls.footer_box)
+
+        outer_paned.set_start_child(ctrl_wrapper)
         outer_paned.set_shrink_start_child(False)
         outer_paned.set_resize_start_child(False)
 
