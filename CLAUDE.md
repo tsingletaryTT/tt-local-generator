@@ -16,9 +16,7 @@ sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0  # if missing
 ## Starting / stopping the inference server
 
 From the GUI, use the **▶ Start** and **■ Stop** buttons in the server control
-row (below the Generation Source toggle). Start is context-aware: Video tab
-runs `start_wan.sh`, Animate tab runs `start_animate.sh`, Image tab runs
-`start_flux.sh`. Script output streams into a collapsible log panel; the panel
+row (below the Generation Source toggle). Start is context-aware: within Video tab, Wan2.2 runs `start_wan.sh` and Mochi-1 runs `start_mochi.sh`; Animate tab runs `start_animate.sh`; Image tab runs `start_flux.sh`. Script output streams into a collapsible log panel; the panel
 closes automatically when the health check confirms the server is ready.
 
 From the terminal:
@@ -27,6 +25,8 @@ From the terminal:
 cd ~/code/tt-local-generator
 ./start_wan.sh            # start Wan2.2-T2V server, tail its log
 ./start_wan.sh --stop     # stop the running server container
+./start_mochi.sh          # start Mochi-1 server, tail its log
+./start_mochi.sh --stop   # stop the running server container
 ./start_animate.sh        # start Wan2.2-Animate-14B server, tail its log
 ./start_animate.sh --stop # stop the running server container
 ./start_flux.sh           # start FLUX server, tail its log
