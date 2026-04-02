@@ -1995,15 +1995,26 @@ class ControlPanel(Gtk.Box):
         if is_image:
             self._src_image_btn.add_css_class("source-btn-active")
             self._title_lbl.set_label("TT IMAGE GENERATOR")
-            self._source_desc_lbl.set_label("synchronous  ·  ~15–90 s  ·  1024×1024 JPEG")
+            self._source_desc_lbl.set_label(
+                "synchronous  ·  FLUX.1-dev  ·  ~15–90 s  ·  1024×1024 JPEG"
+            )
         elif is_animate:
             self._src_animate_btn.add_css_class("source-btn-active")
             self._title_lbl.set_label("TT ANIMATE GENERATOR")
-            self._source_desc_lbl.set_label("async job  ·  Animate-14B  ·  motion video + character")
+            self._source_desc_lbl.set_label(
+                "async job  ·  Animate-14B  ·  motion video + character"
+            )
         else:
             self._src_video_btn.add_css_class("source-btn-active")
             self._title_lbl.set_label("TT VIDEO GENERATOR")
-            self._source_desc_lbl.set_label("async job  ·  ~3–10 min  ·  720p MP4")
+            if self._video_model == "mochi":
+                self._source_desc_lbl.set_label(
+                    "async job  ·  Mochi-1  ·  ~5–15 min  ·  480×848 168-frame"
+                )
+            else:
+                self._source_desc_lbl.set_label(
+                    "async job  ·  Wan2.2-T2V  ·  ~3–10 min  ·  720p MP4"
+                )
 
         # Update prompt placeholder — prompt is optional/style-only for animate
         if is_image:
@@ -2340,6 +2351,14 @@ class ControlPanel(Gtk.Box):
             prompt = self._get_prompt()
             if not prompt:
                 return
+        # Determine the specific model within the active category
+        if self._model_source == "video":
+            current_model_id = self._video_model
+        elif self._model_source == "image":
+            current_model_id = self._image_model
+        else:
+            current_model_id = ""
+
         args = (
             prompt,
             self._get_neg(),
@@ -2351,6 +2370,7 @@ class ControlPanel(Gtk.Box):
             self._ref_video_path,
             self._ref_char_path,
             self._animate_mode,
+            current_model_id,
         )
         if self._busy:
             self._on_enqueue(*args)
