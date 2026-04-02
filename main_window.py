@@ -1620,6 +1620,21 @@ class GalleryWidget(Gtk.Box):
 
 # ── Control panel ──────────────────────────────────────────────────────────────
 
+# Maps server model ID → UI source tab key.
+# Used by both ControlPanel.set_server_state() and MainWindow._on_health_result().
+_MODEL_TO_SOURCE: dict = {
+    "wan2.2-t2v":           "video",
+    "mochi-1-preview":      "video",
+    "wan2.2-animate-14b":   "animate",
+    "flux.1-dev":           "image",
+}
+_MODEL_DISPLAY_SERVER: dict = {
+    "wan2.2-t2v":           "Wan2.2 online",
+    "mochi-1-preview":      "Mochi-1 online",
+    "wan2.2-animate-14b":   "Animate-14B online",
+    "flux.1-dev":           "FLUX online",
+}
+
 class ControlPanel(Gtk.Box):
     """
     Left panel: prompt fields, parameters, seed image, server status,
@@ -1649,6 +1664,8 @@ class ControlPanel(Gtk.Box):
         self._ref_char_path = ""       # animate: character image
         self._animate_mode = "animation"
         self._server_ready = False
+        self._running_model: "str | None" = None  # model ID from /v1/models, or None
+        self._adv_open: bool = False               # accordion expanded state
         self._server_launching = False   # True while start/stop script is running
         self._busy = False
         self._model_source = "video"   # "video", "image", or "animate"
