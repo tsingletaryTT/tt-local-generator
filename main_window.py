@@ -3112,7 +3112,12 @@ class MainWindow(Gtk.ApplicationWindow):
             on_start_prompt_gen=self._on_start_prompt_gen,
             on_inspire=self._on_inspire,
         )
-        outer_paned.set_start_child(self._controls)
+        # Wrap the control panel in a ScrolledWindow so it scrolls when the
+        # window is too short to show everything (chips, advanced settings, etc.)
+        ctrl_scroll = Gtk.ScrolledWindow()
+        ctrl_scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        ctrl_scroll.set_child(self._controls)
+        outer_paned.set_start_child(ctrl_scroll)
         outer_paned.set_shrink_start_child(False)
         outer_paned.set_resize_start_child(False)
 
