@@ -395,6 +395,13 @@ _MODEL_DISPLAY: dict = {
     "wan2.2-animate-14b": "Animate-14B",
 }
 
+# Keys to skip when rendering record.extra_meta in the detail panel — these
+# fields are either shown elsewhere in the panel or too noisy to display.
+_SKIP_META_KEYS: frozenset = frozenset({
+    "status", "error", "id", "prompt", "negative_prompt",
+    "num_inference_steps", "seed", "request_parameters", "guidance_scale",
+})
+
 # Maps (model_source, model_key) to (script_filename, display_label) for server launch.
 _SERVER_SCRIPTS: dict = {
     ("video",   "wan2"):  ("start_wan.sh",     "Wan2.2 video"),
@@ -912,10 +919,6 @@ class DetailPanel(Gtk.ScrolledWindow):
 
         # Append any extra metadata returned by the server, skipping fields
         # already shown above or too large/noisy to display.
-        _SKIP_META_KEYS = frozenset({
-            "status", "error", "id", "prompt", "negative_prompt",
-            "num_inference_steps", "seed", "request_parameters", "guidance_scale",
-        })
         for k, v in record.extra_meta.items():
             if k in _SKIP_META_KEYS or v is None or not str(v).strip():
                 continue
