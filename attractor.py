@@ -132,11 +132,13 @@ _CSS = b"""
     color: @tt_accent_light;
     font-size: 10px;
     font-style: italic;
+    min-height: 30px;   /* 2 lines - prevents layout shift when text changes */
 }
 .attractor-prompt-lbl {
     color: @tt_text_muted;
     font-size: 10px;
     font-style: italic;
+    min-height: 70px;   /* 5 lines - reserves space so sidebar never shrinks */
 }
 .attractor-stop-btn {
     background-color: @tt_bg_error_dark;
@@ -262,6 +264,8 @@ class AttractorWindow(Gtk.Window):
         sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         sidebar.add_css_class("attractor-sidebar")
         sidebar.set_size_request(148, -1)
+        sidebar.set_hexpand(False)
+        sidebar.set_vexpand(True)
 
         hdr = Gtk.Label(label="✦ ATTRACTOR MODE")
         hdr.add_css_class("attractor-header")
@@ -539,7 +543,7 @@ class AttractorWindow(Gtk.Window):
         """
         self._on_enqueue(
             prompt=prompt,
-            negative_prompt="",
+            neg="",
             steps=30,
             seed=-1,
             seed_image_path="",
