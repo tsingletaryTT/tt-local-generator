@@ -186,6 +186,26 @@ _CSS = b"""
 # AttractorWindow
 # ---------------------------------------------------------------------------
 
+def _unload_slot_video(slot: Gtk.Box) -> None:
+    """Pause a slot's Gtk.Video stream before calling set_file(None).
+
+    GStreamer's async state machine needs to transition from PLAYING → PAUSED
+    → NULL before it can release file descriptors.  Calling set_file(None)
+    while the stream is still PLAYING starts that transition asynchronously but
+    doesn't block — so hundreds of ms can pass before the fds are freed.
+    Pausing first moves the pipeline to PAUSED synchronously (the gst-play
+    element handles PAUSED immediately), which dramatically shortens the
+    PLAYING→NULL teardown and prevents fd accumulation across rapid advances.
+    """
+    stream = slot._video.get_media_stream()
+    if stream is not None:
+        try:
+            stream.pause()
+        except Exception:
+            pass
+    slot._video.set_file(None)
+
+
 class AttractorWindow(Gtk.Window):
     """
     Kiosk window: narrow sidebar with live status + A/B crossfading media player.
@@ -474,7 +494,7 @@ class AttractorWindow(Gtk.Window):
             GLib.source_remove(self._pending_unload_source)
             self._pending_unload_source = 0
         if self._slot_to_unload is not None:
-            self._slot_to_unload._video.set_file(None)
+            _unload_slot_video(self._slot_to_unload)
             self._slot_to_unload = None
 
         self._pool.advance()
@@ -520,7 +540,7 @@ class AttractorWindow(Gtk.Window):
         """GLib timer: tear down the GStreamer pipeline for the now-invisible slot."""
         self._pending_unload_source = 0
         if self._slot_to_unload is not None:
-            self._slot_to_unload._video.set_file(None)
+            _unload_slot_video(self._slot_to_unload)
             self._slot_to_unload = None
         return GLib.SOURCE_REMOVE
 
@@ -543,11 +563,11 @@ class AttractorWindow(Gtk.Window):
             # (See CLAUDE.md: "Gtk.Video.set_loop(True) is unreliable")
             path = getattr(record, "video_path", None)
             if path:
-                # Clear the current file before loading the next one so GStreamer
-                # tears down the old pipeline synchronously before opening a new one.
-                # Without this, async pipeline teardown accumulates open file
-                # descriptors until the process hits the fd limit and crashes.
-                slot._video.set_file(None)
+                # Pause then clear the slot's pipeline before loading the new file.
+                # Pausing first moves GStreamer from PLAYING→PAUSED synchronously,
+                # which dramatically shortens the subsequent PAUSED→NULL teardown
+                # triggered by set_file(None) and reduces fd accumulation.
+                _unload_slot_video(slot)
                 slot._video.set_filename(path)
             slot._video.set_visible(True)
 
