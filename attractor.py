@@ -248,6 +248,11 @@ class AttractorWindow(Gtk.Window):
         # while the window is being constructed (start() is called via idle_add so it
         # fires after __init__ returns, but add_record may also be queued via idle_add).
         self._started: bool = False
+        # Cleared to False at the very start of _on_destroy so that idle/timer
+        # callbacks queued by the background generation thread (which may still be
+        # mid-call when the window closes) silently no-op instead of touching
+        # destroyed widgets and triggering GTK's "window shown after destroyed" crash.
+        self._alive: bool = True
         # After each A/B crossfade we schedule a GStreamer pipeline teardown for the
         # now-inactive slot.  Keeping a pipeline open in the hidden slot for the full
         # duration of the next video doubles steady-state fd usage and causes "Too
@@ -300,6 +305,10 @@ class AttractorWindow(Gtk.Window):
 
     def _on_destroy(self, _win) -> None:
         """Stop the generation loop and cancel any pending timers."""
+        # Mark dead FIRST so any idle/timer callbacks that fire after this
+        # point (e.g. queued by the generation thread mid-call) silently bail
+        # instead of touching destroyed widgets.
+        self._alive = False
         # Log a stack trace so we can see what triggered the close.
         _log.info("=== Attractor stopped ===\n%s", "".join(traceback.format_stack()))
         self._gen_stop.set()
@@ -470,6 +479,8 @@ class AttractorWindow(Gtk.Window):
         Begin playback and start the generation loop daemon thread.
         Must be called after the window is presented so the display is ready.
         """
+        if not self._alive:
+            return
         self._started = True
         _log.info("=== Attractor started — pool size: %d ===", self._pool.size)
         if self._pool.size == 0:
@@ -485,7 +496,7 @@ class AttractorWindow(Gtk.Window):
         Load the next media item into the inactive A/B slot and crossfade to it.
         Does nothing if playback is paused.
         """
-        if self._paused:
+        if not self._alive or self._paused:
             return
 
         # Cancel any already-scheduled slot unload.  If _advance fires before the
@@ -539,6 +550,8 @@ class AttractorWindow(Gtk.Window):
     def _on_unload_timer(self) -> bool:
         """GLib timer: tear down the GStreamer pipeline for the now-invisible slot."""
         self._pending_unload_source = 0
+        if not self._alive:
+            return GLib.SOURCE_REMOVE
         if self._slot_to_unload is not None:
             _unload_slot_video(self._slot_to_unload)
             self._slot_to_unload = None
@@ -624,23 +637,27 @@ class AttractorWindow(Gtk.Window):
 
     def _on_advance_timer(self) -> bool:
         """GLib timeout callback — fires when dwell time or fallback timer expires."""
-        _log.warning("advance timer fired (fallback or image dwell) — forcing advance")
         self._pending_advance_source = None
+        if not self._alive:
+            return GLib.SOURCE_REMOVE
+        _log.warning("advance timer fired (fallback or image dwell) — forcing advance")
         self._advance()
-        return False  # one-shot
+        return GLib.SOURCE_REMOVE
 
     def _on_video_ended(self, stream, _param) -> None:
         """Called when the active video stream's ended property changes."""
-        if stream.get_ended():
+        if stream.get_ended() and self._alive:
             _log.debug("notify::ended received — advancing")
             self._advance()
 
     def _retry_connect_stream(self) -> bool:
         """Fallback: GStreamer stream not ready at _schedule_advance time; try again."""
-        _log.debug("retry connecting stream")
         self._pending_advance_source = None
+        if not self._alive:
+            return GLib.SOURCE_REMOVE
+        _log.debug("retry connecting stream")
         self._connect_video_ended()
-        return False
+        return GLib.SOURCE_REMOVE
 
     # ── Generation loop ───────────────────────────────────────────────────
 
@@ -671,7 +688,7 @@ class AttractorWindow(Gtk.Window):
                     seed_text="",
                 )
                 _log.info("prompt generated (depth=%d): %s", depth, prompt[:80])
-                GLib.idle_add(self._prompt_lbl.set_label, prompt)
+                GLib.idle_add(self._set_prompt_lbl, prompt)
                 GLib.idle_add(self._set_gen_status, "⏳  submitted")
                 GLib.idle_add(self._enqueue_generation, prompt)
             except Exception as exc:
@@ -691,6 +708,8 @@ class AttractorWindow(Gtk.Window):
         Forwards a generation request to MainWindow via the on_enqueue callback.
         Uses the model defaults from the spec (steps=30, seed=-1, guidance=5.0).
         """
+        if not self._alive:
+            return
         self._on_enqueue(
             prompt=prompt,
             neg="",
@@ -707,10 +726,20 @@ class AttractorWindow(Gtk.Window):
 
     def _set_gen_status(self, text: str) -> None:
         """Update the generation status label. Must be called on the main thread."""
+        if not self._alive:
+            return
         self._gen_status_lbl.set_label(text)
+
+    def _set_prompt_lbl(self, text: str) -> None:
+        """Update the prompt label. Must be called on the main thread."""
+        if not self._alive:
+            return
+        self._prompt_lbl.set_label(text)
 
     def _update_work_lbl(self, depth: int, generating: bool) -> None:
         """Update the queue/generating status label. Must be called on the main thread."""
+        if not self._alive:
+            return
         if generating and depth > 0:
             self._queue_lbl.set_label(f"🔄  generating +{depth} queued")
         elif generating:
@@ -731,6 +760,8 @@ class AttractorWindow(Gtk.Window):
         If the pool was empty when this window was opened (no media yet),
         also starts playback now that the first item has arrived.
         """
+        if not self._alive:
+            return
         if getattr(record, "media_type", "video") == "image":
             return  # images excluded from attractor playback
         path = getattr(record, "video_path", None) or "?"
