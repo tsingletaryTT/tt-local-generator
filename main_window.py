@@ -1520,7 +1520,7 @@ class PendingCard(Gtk.Frame):
 
 # ── Gallery ────────────────────────────────────────────────────────────────────
 
-_GALLERY_AUTOPLAY_LIMIT = 12   # max cards whose videos are loaded at once during "play all"
+_GALLERY_AUTOPLAY_LIMIT = 4    # max cards whose videos are loaded at once during "play all"
 
 
 class GalleryWidget(Gtk.Box):
@@ -1546,6 +1546,7 @@ class GalleryWidget(Gtk.Box):
         self._select_cb = select_cb   # select_cb(record: GenerationRecord) called on click
         self._delete_cb = delete_cb   # delete_cb(record: GenerationRecord) called on trash
         self._playing_all = False
+        self._sync_autoplay_timer: int = 0  # GLib source id for debounced _sync_autoplay
 
         # ── Toolbar ───────────────────────────────────────────────────────────
         toolbar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -1625,6 +1626,9 @@ class GalleryWidget(Gtk.Box):
         """
         self._playing_all = False
         self._play_all_btn.set_label("▶ Play All")
+        if self._sync_autoplay_timer:
+            GLib.source_remove(self._sync_autoplay_timer)
+            self._sync_autoplay_timer = 0
         for card in self._video_cards():
             try:
                 card._close_hover_pipeline()
@@ -1715,9 +1719,25 @@ class GalleryWidget(Gtk.Box):
                 pass
 
     def _on_scroll_changed(self, _adj) -> None:
-        """Pause/play cards as user scrolls when play-all is active."""
-        if self._playing_all:
-            self._sync_autoplay()
+        """Debounce _sync_autoplay so it fires at most once per 80 ms during scrolling.
+
+        Without debouncing, smooth-scroll events fire at ~60 Hz.  Each call may
+        open or close GStreamer pipelines; GStreamer pipeline teardown is async
+        and each pipeline holds 40-80 file descriptors while winding down.  At
+        60 Hz the teardowns pile up faster than GStreamer can release the fds,
+        exhausting the 1024 fd soft limit and crashing the process.
+        """
+        if not self._playing_all:
+            return
+        if self._sync_autoplay_timer:
+            GLib.source_remove(self._sync_autoplay_timer)
+        self._sync_autoplay_timer = GLib.timeout_add(80, self._run_sync_autoplay)
+
+    def _run_sync_autoplay(self) -> bool:
+        """Debounce target: run _sync_autoplay once after scroll activity quiets."""
+        self._sync_autoplay_timer = 0
+        self._sync_autoplay()
+        return GLib.SOURCE_REMOVE
 
     def add_pending_card(self, prompt: str = "", model_source: str = "video") -> PendingCard:
         card = PendingCard(prompt=prompt, model_source=model_source)
