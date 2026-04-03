@@ -1581,26 +1581,34 @@ class GalleryWidget(Gtk.Box):
         return [c for c in self._cards
                 if isinstance(c, GenerationCard) and c._record.video_exists]
 
+    def stop_all_playback(self) -> None:
+        """Pause every playing thumbnail video and unload its pipeline.
+
+        Called externally (e.g. before launching Attractor Mode) as well as
+        internally when the Play All toggle is turned off.
+        """
+        self._playing_all = False
+        self._play_all_btn.set_label("▶ Play All")
+        for card in self._video_cards():
+            if card._hover_video is not None:
+                try:
+                    stream = card._hover_video.get_media_stream()
+                    if stream is not None:
+                        stream.pause()
+                    card._hover_video.set_file(None)
+                    card._loop_connected = False
+                    card._media_stack.set_visible_child_name("thumb")
+                except Exception:
+                    pass
+
     def _toggle_play_all(self, _btn=None) -> None:
         """Start or stop looping all video thumbnails in the gallery."""
-        self._playing_all = not self._playing_all
         if self._playing_all:
+            self.stop_all_playback()
+        else:
+            self._playing_all = True
             self._play_all_btn.set_label("⏸ Pause All")
             self._sync_autoplay()
-        else:
-            self._play_all_btn.set_label("▶ Play All")
-            # Stop all currently playing thumbnail videos and unload their pipelines.
-            for card in self._video_cards():
-                if card._hover_video is not None:
-                    try:
-                        stream = card._hover_video.get_media_stream()
-                        if stream is not None:
-                            stream.pause()
-                        card._hover_video.set_file(None)
-                        card._loop_connected = False
-                        card._media_stack.set_visible_child_name("thumb")
-                    except Exception:
-                        pass
 
     def _cols_per_row(self) -> int:
         """
@@ -3576,6 +3584,11 @@ class MainWindow(Gtk.ApplicationWindow):
         if self._attractor_win is not None:
             self._attractor_win.present()
             return
+
+        # Stop any gallery videos that are currently playing so their GStreamer
+        # pipelines are released before the attractor opens its own video slots.
+        for gallery in (self._video_gallery, self._animate_gallery, self._image_gallery):
+            gallery.stop_all_playback()
 
         try:
             win = attractor.AttractorWindow(
