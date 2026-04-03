@@ -2,12 +2,12 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: © 2025 Tenstorrent AI ULC
 """
-Attractor Mode — self-sustaining kiosk that cycles generated media and
+Attractor Mode - self-sustaining kiosk that cycles generated media and
 continuously queues new generations.
 
 Classes:
-    AttractorPool  — pure pool/shuffle logic (no GTK, testable)
-    AttractorWindow — GTK4 kiosk window
+    AttractorPool  - pure pool/shuffle logic (no GTK, testable)
+    AttractorWindow - GTK4 kiosk window
 """
 from __future__ import annotations
 
@@ -85,7 +85,7 @@ class AttractorPool:
             return None
         if self._pos < len(self._order):
             return self._records[self._order[self._pos]]
-        # At end of cycle — next would be first item of a fresh shuffle.
+        # At end of cycle - next would be first item of a fresh shuffle.
         # Peek without actually shuffling: return any record that isn't last.
         if len(self._records) == 1:
             return self._records[0]
@@ -141,7 +141,7 @@ class AttractorPool:
 
 
 # ---------------------------------------------------------------------------
-# CSS — registered by AttractorWindow on first instantiation.
+# CSS - registered by AttractorWindow on first instantiation.
 # Uses @define-color variables already declared in main_window.py's stylesheet.
 # ---------------------------------------------------------------------------
 
@@ -169,7 +169,7 @@ _CSS = b"""
     letter-spacing: 1px;
     margin-top: 4px;
 }
-/* "Coming soon" prompt cards — identical geometry, only border/color differ */
+/* "Coming soon" prompt cards - identical geometry, only border/color differ */
 .cs-card {
     background-color: @tt_bg_dark;
     border: 1px solid @tt_border;
@@ -184,7 +184,7 @@ _CSS = b"""
     border-radius: 6px;
     padding: 7px 8px;
     margin-bottom: 3px;
-    min-height: 74px;   /* must match .cs-card exactly — prevents height shift on swap */
+    min-height: 74px;   /* must match .cs-card exactly - prevents height shift on swap */
 }
 .cs-card-tag {
     color: @tt_text_muted;
@@ -204,7 +204,7 @@ _CSS = b"""
     color: @tt_text;
     font-size: 10px;
     font-style: italic;
-    min-height: 42px;   /* 3 lines × 14px — keeps card height stable when text arrives */
+    min-height: 42px;   /* 3 lines x 14px - keeps card height stable when text arrives */
 }
 .cs-card-empty {
     color: @tt_text_muted;
@@ -263,7 +263,7 @@ def _unload_slot_video(slot: Gtk.Box) -> None:
     GStreamer's async state machine needs to transition from PLAYING → PAUSED
     → NULL before it can release file descriptors.  Calling set_file(None)
     while the stream is still PLAYING starts that transition asynchronously but
-    doesn't block — so hundreds of ms can pass before the fds are freed.
+    doesn't block - so hundreds of ms can pass before the fds are freed.
     Pausing first moves the pipeline to PAUSED synchronously (the gst-play
     element handles PAUSED immediately), which dramatically shortens the
     PLAYING→NULL teardown and prevents fd accumulation across rapid advances.
@@ -281,13 +281,13 @@ class AttractorWindow(Gtk.Window):
     """
     Kiosk window: narrow sidebar with live status + A/B crossfading media player.
 
-    All communication with MainWindow is through constructor callbacks — this
+    All communication with MainWindow is through constructor callbacks - this
     class has no imports from main_window.py.
 
     Keyboard shortcuts:
-        Escape  — close window (stops generation loop)
-        F       — toggle fullscreen
-        Space   — pause/resume playback (generation loop continues)
+        Escape  - close window (stops generation loop)
+        F       - toggle fullscreen
+        Space   - pause/resume playback (generation loop continues)
     """
 
     def __init__(
@@ -299,7 +299,7 @@ class AttractorWindow(Gtk.Window):
         get_is_generating: Callable[[], bool] = lambda: False,  # True when worker is active
         system_prompt: str = "",              # unused; kept for caller compatibility
     ) -> None:
-        _log.debug("AttractorWindow.__init__ — %d records, model_source=%s", len(records), model_source)
+        _log.debug("AttractorWindow.__init__ - %d records, model_source=%s", len(records), model_source)
         super().__init__(title="TT-TV")
         self._system_prompt = system_prompt
         self._model_source = model_source
@@ -434,7 +434,7 @@ class AttractorWindow(Gtk.Window):
 
         sidebar.append(_hdivider())
 
-        self._queue_lbl = Gtk.Label(label="⏳  queue: —")
+        self._queue_lbl = Gtk.Label(label="⏳  queue: -")
         self._queue_lbl.add_css_class("attractor-stat-lbl")
         self._queue_lbl.set_xalign(0)
         sidebar.append(self._queue_lbl)
@@ -591,7 +591,7 @@ class AttractorWindow(Gtk.Window):
         if not self._alive:
             return
         self._started = True
-        _log.info("=== Attractor started — pool size: %d ===", self._pool.size)
+        _log.info("=== Attractor started - pool size: %d ===", self._pool.size)
         if self._pool.size > 0:
             self._advance()
         threading.Thread(
@@ -619,7 +619,7 @@ class AttractorWindow(Gtk.Window):
         record = self._pool.current_record()
 
         # Pick the inactive slot (the one not currently showing).
-        # The current active slot will become invisible after the crossfade — we'll
+        # The current active slot will become invisible after the crossfade - we'll
         # unload its GStreamer pipeline once the transition completes.
         prev_name = self._active_slot_name
         prev_slot = self._slot_a if prev_name == "a" else self._slot_b
@@ -681,7 +681,7 @@ class AttractorWindow(Gtk.Window):
             slot._picture.set_visible(True)
         else:
             slot._picture.set_visible(False)
-            # Do NOT call set_loop(True) — it prevents the notify::ended signal
+            # Do NOT call set_loop(True) - it prevents the notify::ended signal
             # from firing on Gtk.MediaStream, breaking advance-on-video-end.
             # (See CLAUDE.md: "Gtk.Video.set_loop(True) is unreliable")
             path = getattr(record, "video_path", None)
@@ -728,36 +728,36 @@ class AttractorWindow(Gtk.Window):
             self._stream_handler_id = stream.connect("notify::ended", self._on_video_ended)
             # If the video already ended while we were waiting, advance now
             if stream.get_ended():
-                _log.debug("stream already ended on connect — advancing immediately")
+                _log.debug("stream already ended on connect - advancing immediately")
                 GLib.idle_add(self._advance)
                 return
             # Safety net: if notify::ended never fires (broken/missing file),
-            # force-advance after 2× the average video duration.
+            # force-advance after 2x the average video duration.
             fallback_ms = int(self._pool.avg_video_duration * 2 * 1000)
-            _log.debug("stream connected — fallback timer set for %.1f s", fallback_ms / 1000)
+            _log.debug("stream connected - fallback timer set for %.1f s", fallback_ms / 1000)
             self._pending_advance_source = GLib.timeout_add(
                 fallback_ms, self._on_advance_timer
             )
         else:
-            # Stream not initialised yet — retry
-            _log.debug("stream not ready — retrying in 500 ms")
+            # Stream not initialised yet - retry
+            _log.debug("stream not ready - retrying in 500 ms")
             self._pending_advance_source = GLib.timeout_add(
                 500, self._retry_connect_stream
             )
 
     def _on_advance_timer(self) -> bool:
-        """GLib timeout callback — fires when dwell time or fallback timer expires."""
+        """GLib timeout callback - fires when dwell time or fallback timer expires."""
         self._pending_advance_source = None
         if not self._alive:
             return GLib.SOURCE_REMOVE
-        _log.warning("advance timer fired (fallback or image dwell) — forcing advance")
+        _log.warning("advance timer fired (fallback or image dwell) - forcing advance")
         self._advance()
         return GLib.SOURCE_REMOVE
 
     def _on_video_ended(self, stream, _param) -> None:
         """Called when the active video stream's ended property changes."""
         if stream.get_ended() and self._alive:
-            _log.debug("notify::ended received — advancing")
+            _log.debug("notify::ended received - advancing")
             self._advance()
 
     def _retry_connect_stream(self) -> bool:
@@ -785,7 +785,7 @@ class AttractorWindow(Gtk.Window):
             GLib.idle_add(self._update_work_lbl, depth, generating)
 
             if depth >= 3:
-                _log.debug("queue full (depth=%d) — waiting 30 s", depth)
+                _log.debug("queue full (depth=%d) - waiting 30 s", depth)
                 GLib.idle_add(self._set_gen_status, "⏸  queue full…")
                 if self._gen_stop.wait(30.0):
                     break
@@ -851,7 +851,7 @@ class AttractorWindow(Gtk.Window):
     def _update_coming_soon_ui(self) -> None:
         """Refresh the 3 coming-soon cards from self._cs_prompts.
 
-        The first prompt (oldest) is the one currently on the GPU — shown with
+        The first prompt (oldest) is the one currently on the GPU - shown with
         a teal border.  Remaining slots show as regular "coming soon" cards.
         Empty slots display a placeholder in muted style.
         """
@@ -954,7 +954,7 @@ class AttractorWindow(Gtk.Window):
         self._pool.add_record(record)
         self._pool_lbl.set_label(f"🎬  pool: {self._pool.size}")
         self._hud_pool_lbl.set_label(f"pool: {self._pool.size}")
-        # The oldest queued prompt just finished generating — remove it from the
+        # The oldest queued prompt just finished generating - remove it from the
         # "coming soon" list since the video is now in the pool.
         if self._cs_prompts:
             self._cs_prompts.pop(0)
@@ -962,7 +962,7 @@ class AttractorWindow(Gtk.Window):
         # Also refresh the "Next on TT-TV" thumbnail since the pool just grew.
         self._update_next_thumb()
         if was_empty and self._started:
-            # First item arrived after start() — begin playback now.
+            # First item arrived after start() - begin playback now.
             # If start() hasn't fired yet (add_record raced ahead via idle_add),
             # defer to start() which will see pool.size > 0 and call _advance().
             self._advance()
