@@ -29,4 +29,11 @@ if ! "$PYTHON" -c "import gi" 2>/dev/null; then
     exit 1
 fi
 
+# GTK4 does not support gtk-modules (GTK3-only feature). KDE writes
+# colorreload-gtk-module and window-decorations-gtk-module into
+# ~/.config/gtk-4.0/settings.ini, which causes GTK4 to attempt loading
+# those GTK3 .so files in-process and segfault. Clear the variable so
+# GTK4 never tries to load any modules.
+export GTK_MODULES=""
+
 exec "$PYTHON" "$SCRIPT_DIR/main.py" "$@"
