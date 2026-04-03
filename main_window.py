@@ -1143,6 +1143,11 @@ class DetailPanel(Gtk.ScrolledWindow):
         rows += [
             ("Seed",         seed_str),
             ("Generated in", _fmt_duration(record.duration_s) if record.duration_s else "—"),
+            ("Speed",        (
+                f"{record.duration_s / record.num_inference_steps:.1f} s/step"
+                if record.duration_s and record.num_inference_steps
+                else "—"
+            )),
             ("File",         file_name),
             ("Size",         size_str),
             ("Job ID",       record.id),

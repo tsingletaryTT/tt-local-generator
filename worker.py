@@ -226,11 +226,17 @@ class GenerationWorker:
         lines = [f"prompt: {record.prompt}"]
         if record.negative_prompt:
             lines.append(f"negative_prompt: {record.negative_prompt}")
+        sec_per_step = (
+            f"{record.duration_s / record.num_inference_steps:.2f}"
+            if record.duration_s and record.num_inference_steps
+            else "—"
+        )
         lines += [
             f"steps: {record.num_inference_steps}",
             f"seed: {record.seed}",
             f"generated: {record.created_at}",
             f"duration_s: {record.duration_s}",
+            f"sec_per_step: {sec_per_step}",
         ]
         if record.seed_image_path:
             lines.append(f"seed_image: {record.seed_image_path}")
@@ -417,6 +423,11 @@ class AnimateGenerationWorker:
 
     def _write_prompt_sidecar(self, record: GenerationRecord) -> None:
         txt_path = Path(record.video_path).with_suffix(".txt")
+        sec_per_step = (
+            f"{record.duration_s / record.num_inference_steps:.2f}"
+            if record.duration_s and record.num_inference_steps
+            else "—"
+        )
         lines = [
             f"mode: animate:{self._animate_mode}",
             f"prompt: {record.prompt}",
@@ -426,6 +437,7 @@ class AnimateGenerationWorker:
             f"seed: {record.seed}",
             f"generated: {record.created_at}",
             f"duration_s: {record.duration_s}",
+            f"sec_per_step: {sec_per_step}",
         ]
         try:
             txt_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -608,12 +620,18 @@ class ImageGenerationWorker:
         lines = [f"prompt: {record.prompt}"]
         if record.negative_prompt:
             lines.append(f"negative_prompt: {record.negative_prompt}")
+        sec_per_step = (
+            f"{record.duration_s / record.num_inference_steps:.2f}"
+            if record.duration_s and record.num_inference_steps
+            else "—"
+        )
         lines += [
             f"steps: {record.num_inference_steps}",
             f"guidance_scale: {record.guidance_scale}",
             f"seed: {record.seed}",
             f"generated: {record.created_at}",
             f"duration_s: {record.duration_s}",
+            f"sec_per_step: {sec_per_step}",
         ]
         try:
             txt_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
