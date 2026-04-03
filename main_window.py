@@ -3844,6 +3844,11 @@ class MainWindow(Gtk.ApplicationWindow):
             self._set_status(
                 f"Restored {n} queued prompt{'s' if n != 1 else ''} from last session"
             )
+            # Auto-start processing if nothing is already generating.
+            # Without this, restored items are visible in the queue but
+            # never kicked off — the server sits idle after a crash/restart.
+            if not (self._worker and self._worker.is_alive()):
+                GLib.idle_add(self._start_next_queued)
 
     def _update_queue_display(self) -> None:
         """Rebuild the queue list below the preview panel. Call from main thread only."""
