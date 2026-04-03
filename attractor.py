@@ -222,6 +222,12 @@ class AttractorWindow(Gtk.Window):
         self._pending_advance_source: int | None = None  # GLib source id
         self._watched_stream = None          # stream we connected notify::ended to
         self._stream_handler_id: int | None = None  # handler ID so we can disconnect
+        # After each A/B crossfade we schedule a GStreamer pipeline teardown for the
+        # now-inactive slot.  Keeping a pipeline open in the hidden slot for the full
+        # duration of the next video doubles steady-state fd usage and causes "Too
+        # many open files" crashes after many advance cycles.
+        self._pending_unload_source: int = 0  # GLib source id for the unload timer
+        self._slot_to_unload = None           # Gtk.Box slot whose pipeline to teardown
 
         # Load CSS (uses @define-color variables already loaded by main_window.py)
         try:
@@ -267,12 +273,16 @@ class AttractorWindow(Gtk.Window):
         return False
 
     def _on_destroy(self, _win) -> None:
-        """Stop the generation loop and cancel any pending advance timer."""
+        """Stop the generation loop and cancel any pending timers."""
         _log.info("=== Attractor stopped ===")
         self._gen_stop.set()
         if self._pending_advance_source is not None:
             GLib.source_remove(self._pending_advance_source)
             self._pending_advance_source = None
+        if self._pending_unload_source:
+            GLib.source_remove(self._pending_unload_source)
+            self._pending_unload_source = 0
+        self._slot_to_unload = None
         # Disconnect the notify::ended handler so a late-firing signal after
         # window destruction doesn't call _advance() on a dead widget tree.
         if self._watched_stream is not None and self._stream_handler_id is not None:
@@ -449,16 +459,39 @@ class AttractorWindow(Gtk.Window):
         """
         if self._paused:
             return
+
+        # Cancel any already-scheduled slot unload.  If _advance fires before the
+        # unload timer fires, execute the unload eagerly so we don't skip it.
+        if self._pending_unload_source:
+            GLib.source_remove(self._pending_unload_source)
+            self._pending_unload_source = 0
+        if self._slot_to_unload is not None:
+            self._slot_to_unload._video.set_file(None)
+            self._slot_to_unload = None
+
         self._pool.advance()
         record = self._pool.current_record()
 
-        # Pick the inactive slot (the one not currently showing)
-        next_name = "b" if self._active_slot_name == "a" else "a"
+        # Pick the inactive slot (the one not currently showing).
+        # The current active slot will become invisible after the crossfade — we'll
+        # unload its GStreamer pipeline once the transition completes.
+        prev_name = self._active_slot_name
+        prev_slot = self._slot_a if prev_name == "a" else self._slot_b
+        next_name = "b" if prev_name == "a" else "a"
         next_slot = self._slot_b if next_name == "b" else self._slot_a
 
         self._load_slot(next_slot, record)
         self._stack.set_visible_child_name(next_name)
         self._active_slot_name = next_name
+
+        # Schedule the now-invisible slot's pipeline teardown after the crossfade
+        # (250 ms) plus a small safety margin.  This keeps steady-state pipeline
+        # count at 1 instead of 2, preventing fd accumulation over many cycles.
+        self._slot_to_unload = prev_slot
+        self._pending_unload_source = GLib.timeout_add(
+            self._stack.get_transition_duration() + 50,
+            self._on_unload_timer,
+        )
 
         # Update HUD
         prompt_text = (getattr(record, "prompt", "") or "")[:100]
@@ -474,6 +507,14 @@ class AttractorWindow(Gtk.Window):
                   duration or 0.0,
                   self._pool.size)
         self._schedule_advance(record)
+
+    def _on_unload_timer(self) -> bool:
+        """GLib timer: tear down the GStreamer pipeline for the now-invisible slot."""
+        self._pending_unload_source = 0
+        if self._slot_to_unload is not None:
+            self._slot_to_unload._video.set_file(None)
+            self._slot_to_unload = None
+        return GLib.SOURCE_REMOVE
 
     def _load_slot(self, slot: Gtk.Box, record) -> None:
         """
