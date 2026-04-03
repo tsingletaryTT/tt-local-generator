@@ -14,8 +14,21 @@ Requires system python3-gi (GTK4 bindings) — install via:
     sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0
 """
 import argparse
+import resource
 import sys
 from pathlib import Path
+
+# Raise the open-file descriptor limit early.  GStreamer video pipelines each
+# hold ~40–80 fds (epoll, wakeup pipes, PulseAudio sockets, per-thread eventfds).
+# The kernel default soft limit of 1024 is easily exhausted when a gallery with
+# many cards has hover-previews open, or when the attractor cycles rapidly.
+# We request 4096; cap at the hard limit (typically 4096 or unlimited = 1048576).
+try:
+    _soft, _hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    if _soft < 4096:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (min(_hard, 4096), _hard))
+except (ValueError, OSError):
+    pass  # non-fatal; the app will still run, just with less headroom
 
 import gi
 gi.require_version("Gtk", "4.0")

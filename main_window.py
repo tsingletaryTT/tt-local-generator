@@ -1005,6 +1005,9 @@ class DetailPanel(Gtk.ScrolledWindow):
             stream = self._video_widget.get_media_stream()
             if stream and stream.get_playing():
                 stream.pause()
+            # Begin GStreamer pipeline teardown now rather than waiting for GTK's
+            # async widget destruction to trigger it.
+            self._video_widget.set_file(None)
         self._video_widget = None
         self._play_btn = None
         self._show_empty()
@@ -1014,11 +1017,15 @@ class DetailPanel(Gtk.ScrolledWindow):
         self._record = record
         self._iterate_cb = iterate_cb
 
-        # Pause any previously playing video before replacing it
+        # Unload the previous video pipeline before replacing it.  Calling
+        # set_file(None) starts GStreamer teardown immediately; without it the
+        # teardown is deferred until GTK's async widget destruction, which can
+        # leave the pipeline's fds open longer than necessary.
         if self._video_widget is not None:
             stream = self._video_widget.get_media_stream()
             if stream and stream.get_playing():
                 stream.pause()
+            self._video_widget.set_file(None)
         self._video_widget = None
         self._play_btn = None
 
