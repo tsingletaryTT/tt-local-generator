@@ -350,7 +350,7 @@ class AttractorWindow(Gtk.Window):
         _log.debug("building UI")
         self._build()
         _log.debug("UI built, maximizing")
-        self.maximize()
+        self.fullscreen()
 
         # Keyboard shortcuts
         ctrl = Gtk.EventControllerKey()
@@ -423,7 +423,7 @@ class AttractorWindow(Gtk.Window):
         # ── Sidebar ───────────────────────────────────────────────────────
         sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         sidebar.add_css_class("attractor-sidebar")
-        sidebar.set_size_request(260, -1)
+        sidebar.set_size_request(220, -1)
         sidebar.set_hexpand(False)
         sidebar.set_vexpand(True)
 
@@ -460,7 +460,7 @@ class AttractorWindow(Gtk.Window):
             card_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
             card_box.add_css_class("cs-card")
             # Lock height: must match CSS min-height (74px) so GTK never reflows.
-            card_box.set_size_request(240, 74)
+            card_box.set_size_request(200, 74)
 
             tag_lbl = Gtk.Label(label="COMING SOON")
             tag_lbl.add_css_class("cs-card-tag")
@@ -490,7 +490,7 @@ class AttractorWindow(Gtk.Window):
         next_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         next_card.add_css_class("next-card")
         # Lock height so the bottom section never shifts when a thumbnail loads.
-        next_card.set_size_request(240, 148)
+        next_card.set_size_request(200, 148)
 
         next_tag = Gtk.Label(label="NEXT ON TT-TV")
         next_tag.add_css_class("next-card-tag")
