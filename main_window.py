@@ -2804,7 +2804,12 @@ class ControlPanel(Gtk.Box):
             self._gen_btn.set_label("Generate")
             self._gen_btn.set_sensitive(self._server_ready)
             self._gen_btn.set_tooltip_text("")
-        self._recover_btn.set_sensitive(self._server_ready and not self._busy)
+        # Recover Jobs only needs a reachable server — not a tab-matched one.
+        # _server_ready is True on tab-match; _running_model is non-None on mismatch.
+        # Either condition means the server responded to the health check.
+        # detect_running_model() can return None even when ready, so check both.
+        server_reachable = self._server_ready or self._running_model is not None
+        self._recover_btn.set_sensitive(server_reachable and not self._busy and not self._server_launching)
 
     # ── Seed image ─────────────────────────────────────────────────────────────
 
@@ -3831,6 +3836,10 @@ class MainWindow(Gtk.ApplicationWindow):
                 on_enqueue=self._on_attractor_generate,
                 get_queue_depth=lambda: len(self._queue),
                 get_is_generating=lambda: bool(self._worker and self._worker.is_alive()),
+                get_server_status=lambda: (
+                    self._controls._server_ready,
+                    self._controls._running_model,
+                ),
             )
         except Exception:
             import traceback

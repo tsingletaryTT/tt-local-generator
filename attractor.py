@@ -150,11 +150,27 @@ class AttractorPool:
 # ---------------------------------------------------------------------------
 
 _CSS = b"""
+/* Channel-change flash overlay */
+/* TT brand purple (#5A1A6E) wash - slightly darker than the logo purple */
+@keyframes tt-channel-change {
+    0%   { opacity: 0; }
+    8%   { opacity: 1; }
+    65%  { opacity: 0.5; }
+    100% { opacity: 0; }
+}
+.channel-flash {
+    background-color: #5A1A6E;
+    opacity: 0;
+}
+.channel-flash.flash-active {
+    animation: tt-channel-change 0.65s ease-out forwards;
+}
+
 /* Attractor sidebar */
 .attractor-sidebar {
     background-color: @tt_bg_darkest;
     border-right: 1px solid @tt_border;
-    padding: 10px 10px;
+    padding: 8px 8px;
 }
 .attractor-header {
     color: @tt_accent;
@@ -178,17 +194,17 @@ _CSS = b"""
     background-color: @tt_bg_dark;
     border: 1px solid @tt_border;
     border-radius: 6px;
-    padding: 7px 8px;
+    padding: 5px 6px;
     margin-bottom: 3px;
-    min-height: 74px;   /* tag(12) + gap(2) + 3-line-prompt(42) + v-padding(18) */
+    min-height: 52px;   /* tag(12) + gap(2) + 2-line-prompt(28) + v-padding(10) */
 }
 .cs-card-generating {
     background-color: @tt_bg_dark;
     border: 1px solid @tt_accent;
     border-radius: 6px;
-    padding: 7px 8px;
+    padding: 5px 6px;
     margin-bottom: 3px;
-    min-height: 74px;   /* must match .cs-card exactly - prevents height shift on swap */
+    min-height: 52px;   /* must match .cs-card exactly - prevents height shift on swap */
 }
 .cs-card-tag {
     color: @tt_text_muted;
@@ -206,30 +222,30 @@ _CSS = b"""
 }
 .cs-card-prompt {
     color: @tt_text;
-    font-size: 10px;
+    font-size: 9px;
     font-style: italic;
-    min-height: 42px;   /* 3 lines x 14px - keeps card height stable when text arrives */
+    min-height: 28px;   /* 2 lines x 14px - keeps card height stable when text arrives */
 }
 .cs-card-empty {
     color: @tt_text_muted;
-    font-size: 10px;
+    font-size: 9px;
     font-style: italic;
-    min-height: 42px;   /* must match .cs-card-prompt */
+    min-height: 28px;   /* must match .cs-card-prompt */
 }
 /* "Next on TT-TV" card */
 .next-card {
     background-color: @tt_bg_dark;
     border: 1px solid @tt_border;
     border-radius: 6px;
-    padding: 7px 8px;
-    min-height: 148px;  /* tag(12) + gap(5) + thumb(120) + v-padding(11) */
+    padding: 5px 6px;
+    min-height: 90px;   /* tag(12) + gap(4) + thumb(60) + v-padding(14) */
 }
 .next-card-tag {
     color: @tt_accent_light;
     font-size: 8px;
     font-weight: bold;
     letter-spacing: 1px;
-    margin-bottom: 5px;
+    margin-bottom: 4px;
     min-height: 12px;
 }
 .attractor-stop-btn {
@@ -301,6 +317,7 @@ class AttractorWindow(Gtk.Window):
         on_enqueue: Callable,                 # MainWindow._on_enqueue compatible signature
         get_queue_depth: Callable[[], int],   # returns len(self._queue) in MainWindow
         get_is_generating: Callable[[], bool] = lambda: False,  # True when worker is active
+        get_server_status: "Callable[[], tuple[bool, str | None]]" = lambda: (False, None),
         system_prompt: str = "",              # unused; kept for caller compatibility
     ) -> None:
         _log.debug("AttractorWindow.__init__ - %d records, model_source=%s", len(records), model_source)
@@ -310,6 +327,8 @@ class AttractorWindow(Gtk.Window):
         self._on_enqueue = on_enqueue
         self._get_queue_depth = get_queue_depth
         self._get_is_generating = get_is_generating
+        self._get_server_status = get_server_status
+        self._att_poll_stop = threading.Event()
         video_records = [r for r in records if getattr(r, "media_type", "video") != "image"]
         _log.debug("pool filter: %d total → %d video records", len(records), len(video_records))
         self._pool = AttractorPool(video_records)
@@ -335,8 +354,9 @@ class AttractorWindow(Gtk.Window):
         self._pending_unload_source: int = 0  # GLib source id for the unload timer
         self._slot_to_unload = None           # Gtk.Box slot whose pipeline to teardown
         # Prompts submitted to the generation queue; oldest = currently generating.
-        # Displayed in the "Coming soon" sidebar cards (max 3).
+        # Displayed in the "Coming soon" sidebar cards (max 2).
         self._cs_prompts: list[str] = []
+        self._pending_flash_source: int = 0   # GLib source id for flash clear timer
 
         # Load CSS (uses @define-color variables already loaded by main_window.py)
         try:
@@ -362,6 +382,11 @@ class AttractorWindow(Gtk.Window):
         self.add_controller(ctrl)
 
         self.connect("destroy", self._on_destroy)
+        # Explicitly destroy (not merely hide) when the user clicks X or the Stop
+        # button calls close().  GTK4's default close-request can hide the window
+        # instead of destroying it, leaving _attractor_win non-None and preventing
+        # a fresh open on the second launch.
+        self.connect("close-request", self._on_close_requested)
 
     # ── Event handlers ────────────────────────────────────────────────────
 
@@ -381,6 +406,17 @@ class AttractorWindow(Gtk.Window):
             return True
         return False
 
+    def _on_close_requested(self, _win) -> bool:
+        """Force full window destruction on close so _on_destroy always fires.
+
+        GTK4's default close-request handler may merely hide the window, which
+        would leave _attractor_win non-None in MainWindow and break the second
+        launch.  We explicitly call destroy() then return True so GTK doesn't
+        do a redundant second close.
+        """
+        self.destroy()
+        return True  # we handled it
+
     def _on_destroy(self, _win) -> None:
         """Stop the generation loop and cancel any pending timers."""
         # Mark dead FIRST so any idle/timer callbacks that fire after this
@@ -390,12 +426,16 @@ class AttractorWindow(Gtk.Window):
         # Log a stack trace so we can see what triggered the close.
         _log.info("=== Attractor stopped ===\n%s", "".join(traceback.format_stack()))
         self._gen_stop.set()
+        self._att_poll_stop.set()
         if self._pending_advance_source is not None:
             GLib.source_remove(self._pending_advance_source)
             self._pending_advance_source = None
         if self._pending_unload_source:
             GLib.source_remove(self._pending_unload_source)
             self._pending_unload_source = 0
+        if self._pending_flash_source:
+            GLib.source_remove(self._pending_flash_source)
+            self._pending_flash_source = 0
         self._slot_to_unload = None
         # Disconnect the notify::ended handler so a late-firing signal after
         # window destruction doesn't call _advance() on a dead widget tree.
@@ -420,14 +460,17 @@ class AttractorWindow(Gtk.Window):
     # ── Layout ────────────────────────────────────────────────────────────
 
     def _build(self) -> None:
-        """Build the kiosk layout: sidebar on left, media player on right."""
+        """Build the kiosk layout: sidebar on left, media player on right, status bar at bottom."""
+        root_vbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.set_child(root_vbox)
+
         outer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL)
-        self.set_child(outer)
+        outer.set_vexpand(True)
 
         # ── Sidebar ───────────────────────────────────────────────────────
         sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         sidebar.add_css_class("attractor-sidebar")
-        sidebar.set_size_request(220, -1)
+        sidebar.set_size_request(160, -1)
         sidebar.set_hexpand(False)
         sidebar.set_vexpand(True)
 
@@ -456,15 +499,15 @@ class AttractorWindow(Gtk.Window):
         cs_hdr.set_xalign(0)
         sidebar.append(cs_hdr)
 
-        # Build 3 reusable card widgets; updated by _update_coming_soon_ui().
+        # Build 2 reusable card widgets; updated by _update_coming_soon_ui().
         # Card dimensions are locked (set_size_request + CSS min-height) so the
         # sidebar never reflows when text appears or CSS classes swap.
         self._cs_cards: list[dict] = []
-        for _ in range(3):
+        for _ in range(2):
             card_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
             card_box.add_css_class("cs-card")
-            # Lock height: must match CSS min-height (74px) so GTK never reflows.
-            card_box.set_size_request(200, 74)
+            # Lock height: must match CSS min-height (52px) so GTK never reflows.
+            card_box.set_size_request(-1, 52)
 
             tag_lbl = Gtk.Label(label="COMING SOON")
             tag_lbl.add_css_class("cs-card-tag")
@@ -476,10 +519,10 @@ class AttractorWindow(Gtk.Window):
             prompt_lbl.set_xalign(0)
             prompt_lbl.set_wrap(True)
             prompt_lbl.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
-            prompt_lbl.set_lines(3)
+            prompt_lbl.set_lines(2)
             prompt_lbl.set_ellipsize(Pango.EllipsizeMode.END)
-            # Reserve 3-line height immediately so card size is stable before text arrives.
-            prompt_lbl.set_size_request(-1, 42)
+            # Reserve 2-line height immediately so card size is stable before text arrives.
+            prompt_lbl.set_size_request(-1, 28)
             card_box.append(prompt_lbl)
 
             sidebar.append(card_box)
@@ -494,7 +537,7 @@ class AttractorWindow(Gtk.Window):
         next_card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         next_card.add_css_class("next-card")
         # Lock height so the bottom section never shifts when a thumbnail loads.
-        next_card.set_size_request(200, 148)
+        next_card.set_size_request(-1, 90)
 
         next_tag = Gtk.Label(label="NEXT ON TT-TV")
         next_tag.add_css_class("next-card-tag")
@@ -503,7 +546,7 @@ class AttractorWindow(Gtk.Window):
 
         self._next_thumb = Gtk.Picture()
         self._next_thumb.set_content_fit(Gtk.ContentFit.CONTAIN)
-        self._next_thumb.set_size_request(-1, 120)
+        self._next_thumb.set_size_request(-1, 60)
         self._next_thumb.set_hexpand(True)
         self._next_thumb.set_vexpand(True)
         next_card.append(self._next_thumb)
@@ -522,10 +565,11 @@ class AttractorWindow(Gtk.Window):
         player_overlay.set_hexpand(True)
         player_overlay.set_vexpand(True)
 
-        # A/B Stack with crossfade
+        # A/B Stack — instant cut; the channel-change effect is handled by the
+        # flash overlay below, not by a GTK stack transition.
         self._stack = Gtk.Stack()
-        self._stack.set_transition_type(Gtk.StackTransitionType.CROSSFADE)
-        self._stack.set_transition_duration(250)
+        self._stack.set_transition_type(Gtk.StackTransitionType.NONE)
+        self._stack.set_transition_duration(0)
         self._stack.set_hexpand(True)
         self._stack.set_vexpand(True)
 
@@ -557,7 +601,20 @@ class AttractorWindow(Gtk.Window):
         hud.append(self._hud_pool_lbl)
 
         player_overlay.add_overlay(hud)
+
+        # Channel-change flash overlay — full-screen, non-interactive.
+        # Normally transparent (opacity: 0). CSS class "flash-active" triggers
+        # the @keyframes tt-channel-change animation for the between-video flash.
+        self._channel_flash = Gtk.Box()
+        self._channel_flash.set_hexpand(True)
+        self._channel_flash.set_vexpand(True)
+        self._channel_flash.set_can_target(False)
+        self._channel_flash.add_css_class("channel-flash")
+        player_overlay.add_overlay(self._channel_flash)
+
         outer.append(player_overlay)
+        root_vbox.append(outer)
+        root_vbox.append(self._build_att_status_bar())
 
     def _make_slot(self) -> Gtk.Box:
         """
@@ -598,9 +655,8 @@ class AttractorWindow(Gtk.Window):
         _log.info("=== Attractor started - pool size: %d ===", self._pool.size)
         if self._pool.size > 0:
             self._advance()
-        threading.Thread(
-            target=self._generation_loop, daemon=True
-        ).start()
+        threading.Thread(target=self._generation_loop, daemon=True).start()
+        threading.Thread(target=self._att_status_poll_loop, daemon=True).start()
 
     def _advance(self) -> None:
         """
@@ -761,8 +817,8 @@ class AttractorWindow(Gtk.Window):
     def _on_video_ended(self, stream, _param) -> None:
         """Called when the active video stream's ended property changes."""
         if stream.get_ended() and self._alive:
-            _log.debug("notify::ended received - advancing")
-            self._advance()
+            _log.debug("notify::ended received - triggering channel change")
+            self._trigger_channel_change()
 
     def _retry_connect_stream(self) -> bool:
         """Fallback: GStreamer stream not ready at _schedule_advance time; try again."""
@@ -840,7 +896,7 @@ class AttractorWindow(Gtk.Window):
         # Track the submitted prompt in the "coming soon" sidebar cards.
         # Keep newest 3; oldest is the one currently on the GPU.
         self._cs_prompts.append(prompt)
-        if len(self._cs_prompts) > 3:
+        if len(self._cs_prompts) > 2:
             self._cs_prompts.pop(0)
         self._update_coming_soon_ui()
         self._on_enqueue(
@@ -984,6 +1040,51 @@ class AttractorWindow(Gtk.Window):
             # defer to start() which will see pool.size > 0 and call _advance().
             self._advance()
 
+    # ── Channel-change transition ─────────────────────────────────────────
+
+    def _trigger_channel_change(self) -> None:
+        """Show a brief channel-change flash overlay, then cut to the next video.
+
+        Sequence:
+          0 ms  — flash overlay CSS animation starts (ramps to full brightness)
+        150 ms  — _advance() fires: instant stack cut happens under the flash
+        750 ms  — CSS animation has faded out; remove the active class
+        """
+        if not self._alive:
+            return
+        # Cancel any pending advance timer that may have been set (e.g. fallback timer)
+        if self._pending_advance_source is not None:
+            GLib.source_remove(self._pending_advance_source)
+            self._pending_advance_source = None
+        # Cancel any previous flash-clear timer so we can restart the animation
+        if self._pending_flash_source:
+            GLib.source_remove(self._pending_flash_source)
+            self._pending_flash_source = 0
+        # Restart the CSS animation: remove then re-add the active class so GTK
+        # re-triggers the @keyframes from 0% even if it was already running.
+        self._channel_flash.remove_css_class("flash-active")
+        self._channel_flash.add_css_class("flash-active")
+        # Do the actual video switch at the flash peak (~150 ms in)
+        self._pending_advance_source = GLib.timeout_add(150, self._on_channel_peak)
+
+    def _on_channel_peak(self) -> bool:
+        """GLib timer: execute the instant video switch during the channel-change flash."""
+        self._pending_advance_source = None
+        if not self._alive:
+            return GLib.SOURCE_REMOVE
+        self._advance()
+        # Schedule class removal after the full animation (~650 ms for the CSS animation
+        # itself, fired 150 ms after the animation started = 500 ms after _advance).
+        self._pending_flash_source = GLib.timeout_add(550, self._clear_channel_flash)
+        return GLib.SOURCE_REMOVE
+
+    def _clear_channel_flash(self) -> bool:
+        """GLib timer: remove the flash active class once the CSS animation has ended."""
+        self._pending_flash_source = 0
+        if self._alive:
+            self._channel_flash.remove_css_class("flash-active")
+        return GLib.SOURCE_REMOVE
+
     def _get_current_video_stream(self):
         """Return the Gtk.MediaStream for the active video slot, or None."""
         slot = self._slot_b if self._active_slot_name == "b" else self._slot_a
@@ -991,6 +1092,128 @@ class AttractorWindow(Gtk.Window):
         if not vid.get_visible():
             return None
         return vid.get_media_stream()
+
+    # ── TT-TV status bar ──────────────────────────────────────────────────
+
+    def _build_att_status_bar(self) -> Gtk.Box:
+        """Slim status strip mirroring the main window status bar."""
+        bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=10)
+        bar.add_css_class("tt-statusbar")
+        bar.set_hexpand(True)
+
+        self._att_srv_dot = Gtk.Label(label="⬤")
+        self._att_srv_dot.add_css_class("tt-statusbar-dot-offline")
+        bar.append(self._att_srv_dot)
+
+        self._att_srv_lbl = Gtk.Label(label="offline")
+        self._att_srv_lbl.add_css_class("tt-statusbar-seg")
+        bar.append(self._att_srv_lbl)
+
+        bar.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
+
+        self._att_queue_lbl = Gtk.Label(label="")
+        self._att_queue_lbl.add_css_class("tt-statusbar-seg")
+        self._att_queue_lbl.set_visible(False)
+        bar.append(self._att_queue_lbl)
+
+        bar.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
+
+        self._att_disk_lbl = Gtk.Label(label="")
+        self._att_disk_lbl.add_css_class("tt-statusbar-seg")
+        bar.append(self._att_disk_lbl)
+
+        bar.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
+
+        self._att_chip_lbl = Gtk.Label(label="")
+        self._att_chip_lbl.add_css_class("tt-statusbar-seg")
+        self._att_chip_lbl.set_visible(False)
+        bar.append(self._att_chip_lbl)
+
+        return bar
+
+    def _att_status_poll_loop(self) -> None:
+        """Background thread: polls server status, disk, and chip telemetry every 10s."""
+        import json as _json
+        import subprocess as _subprocess
+
+        def _f(val) -> float:
+            try:
+                return float(val) if val is not None else 0.0
+            except (TypeError, ValueError):
+                return 0.0
+
+        while not self._att_poll_stop.is_set():
+            ready, model = self._get_server_status()
+            depth = self._get_queue_depth()
+            generating = self._get_is_generating()
+
+            try:
+                free = shutil.disk_usage(_STORAGE_DIR).free
+                disk_text = f"{free / (1024**3):.0f} GB free"
+            except OSError:
+                disk_text = "disk ?"
+
+            chip_text = ""
+            try:
+                proc = _subprocess.run(
+                    ["tt-smi", "-s"], capture_output=True, text=True, timeout=5
+                )
+                if proc.returncode == 0:
+                    data = _json.loads(proc.stdout)
+                    chips = data.get("device_info", [])
+                    if chips:
+                        temps  = [_f(c.get("telemetry", {}).get("asic_temperature")) for c in chips]
+                        powers = [_f(c.get("telemetry", {}).get("power"))            for c in chips]
+                        clocks = [_f(c.get("telemetry", {}).get("aiclk"))            for c in chips]
+                        parts: list[str] = []
+                        if any(temps):  parts.append(f"{max(temps):.0f}°C")
+                        if any(powers): parts.append(f"{sum(powers):.0f}W")
+                        if any(clocks): parts.append(f"{max(clocks):.0f}MHz")
+                        chip_text = "  ".join(parts)
+            except Exception:
+                pass
+
+            GLib.idle_add(self._update_att_statusbar,
+                          ready, model or "", depth, generating, disk_text, chip_text)
+            self._att_poll_stop.wait(10.0)
+
+    def _update_att_statusbar(
+        self, ready: bool, model: str, depth: int,
+        generating: bool, disk_text: str, chip_text: str,
+    ) -> bool:
+        """Update the TT-TV status strip. Runs on the main thread via GLib.idle_add."""
+        if not self._alive:
+            return False
+
+        # Server dot
+        for cls in ("tt-statusbar-dot-ready", "tt-statusbar-dot-offline",
+                    "tt-statusbar-dot-starting"):
+            self._att_srv_dot.remove_css_class(cls)
+        self._att_srv_dot.add_css_class(
+            "tt-statusbar-dot-ready" if ready else "tt-statusbar-dot-offline"
+        )
+        self._att_srv_lbl.set_label(model if model else "offline")
+
+        # Queue / generating status
+        if generating and depth > 0:
+            q = f"🔄 +{depth} queued"
+        elif generating:
+            q = "🔄 generating"
+        elif depth > 0:
+            q = f"⏳ {depth} queued"
+        else:
+            q = ""
+        self._att_queue_lbl.set_label(q)
+        self._att_queue_lbl.set_visible(bool(q))
+
+        # Disk
+        self._att_disk_lbl.set_label(disk_text)
+
+        # Chip telemetry
+        self._att_chip_lbl.set_label(chip_text)
+        self._att_chip_lbl.set_visible(bool(chip_text))
+
+        return False
 
 
 def _hdivider() -> Gtk.Separator:
