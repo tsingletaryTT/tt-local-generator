@@ -3834,11 +3834,23 @@ class MainWindow(Gtk.ApplicationWindow):
                 system_prompt=self._prompt_gen_system_prompt,
                 model_source=self._controls.get_model_source(),
                 on_enqueue=self._on_attractor_generate,
+                on_user_enqueue=self._on_attractor_priority_enqueue,
                 get_queue_depth=lambda: len(self._queue),
+                get_queue_prompts=lambda: [item.prompt for item in self._queue],
+                get_current_prompt=lambda: (
+                    self._worker_gen._prompt
+                    if self._worker_gen and self._worker and self._worker.is_alive()
+                    else None
+                ),
                 get_is_generating=lambda: bool(self._worker and self._worker.is_alive()),
                 get_server_status=lambda: (
                     self._controls._server_ready,
-                    self._controls._running_model,
+                    # Map raw model ID → display name for the TT-TV status bar.
+                    # Falls back to the raw ID, or None if server is offline.
+                    _MODEL_DISPLAY_SERVER.get(
+                        self._controls._running_model or "",
+                        self._controls._running_model,
+                    ),
                 ),
             )
         except Exception:
@@ -3859,6 +3871,30 @@ class MainWindow(Gtk.ApplicationWindow):
     def _on_attractor_closed(self, _win) -> None:
         """Called when the attractor window is destroyed."""
         self._attractor_win = None
+
+    def _on_attractor_priority_enqueue(self, prompt, neg="", steps=30, seed=-1,
+                                        seed_image_path="", model_source="video",
+                                        guidance_scale=5.0, ref_video_path="",
+                                        ref_char_path="", animate_mode="animation",
+                                        model_id="") -> None:
+        """Enqueue a user-typed TT-TV prompt ahead of any pending auto-generated ones.
+
+        Inserts at position 0 so the user's intent is served before the attractor's
+        auto-prompts.  If the worker is idle, starts the job directly instead.
+        """
+        if not self._check_disk_space():
+            return
+        if self._worker and self._worker.is_alive():
+            self._queue.insert(0, _QueueItem(prompt, neg, steps, seed, seed_image_path,
+                                              model_source, guidance_scale,
+                                              ref_video_path, ref_char_path,
+                                              animate_mode, model_id))
+            self._persist_queue()
+            self._update_queue_display()
+        else:
+            self._on_generate(prompt, neg, steps, seed, seed_image_path,
+                              model_source, guidance_scale, ref_video_path,
+                              ref_char_path, animate_mode, model_id)
 
     def _on_attractor_generate(self, prompt, neg, steps, seed, seed_image_path="",
                                 model_source="video", guidance_scale=3.5,
