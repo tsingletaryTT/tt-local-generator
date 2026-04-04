@@ -170,24 +170,22 @@ _CSS = b"""
 .attractor-sidebar {
     background-color: @tt_bg_darkest;
     border-right: 1px solid @tt_border;
-    padding: 8px 8px;
+    padding: 6px 4px;
     min-width: 84px;
 }
 .attractor-header {
     color: @tt_accent;
-    font-size: 13px;
+    font-size: 11px;
     font-weight: bold;
-    letter-spacing: 1px;
 }
 .attractor-stat-lbl {
     color: @tt_text_muted;
-    font-size: 10px;
+    font-size: 9px;
 }
 .attractor-section-lbl {
     color: @tt_text_muted;
-    font-size: 9px;
+    font-size: 8px;
     font-weight: bold;
-    letter-spacing: 1px;
     margin-top: 4px;
 }
 /* "Coming soon" prompt cards - identical geometry, only border/color differ */
@@ -211,14 +209,12 @@ _CSS = b"""
     color: @tt_text_muted;
     font-size: 8px;
     font-weight: bold;
-    letter-spacing: 1px;
     min-height: 12px;   /* lock tag row height regardless of text */
 }
 .cs-card-tag-generating {
     color: @tt_accent;
     font-size: 8px;
     font-weight: bold;
-    letter-spacing: 1px;
     min-height: 12px;   /* must match .cs-card-tag */
 }
 .cs-card-prompt {
@@ -245,7 +241,6 @@ _CSS = b"""
     color: @tt_accent_light;
     font-size: 8px;
     font-weight: bold;
-    letter-spacing: 1px;
     margin-bottom: 4px;
     min-height: 12px;
 }
@@ -523,6 +518,8 @@ class AttractorWindow(Gtk.Window):
         hdr = Gtk.Label(label="📺  TT-TV")
         hdr.add_css_class("attractor-header")
         hdr.set_xalign(0)
+        hdr.set_max_width_chars(10)
+        hdr.set_ellipsize(Pango.EllipsizeMode.END)
         sidebar.append(hdr)
 
         sidebar.append(_hdivider())
@@ -530,11 +527,15 @@ class AttractorWindow(Gtk.Window):
         self._queue_lbl = Gtk.Label(label="⏳  queue: -")
         self._queue_lbl.add_css_class("attractor-stat-lbl")
         self._queue_lbl.set_xalign(0)
+        self._queue_lbl.set_max_width_chars(12)
+        self._queue_lbl.set_ellipsize(Pango.EllipsizeMode.END)
         sidebar.append(self._queue_lbl)
 
         self._pool_lbl = Gtk.Label(label=f"🎬  pool: {self._pool.size}")
         self._pool_lbl.add_css_class("attractor-stat-lbl")
         self._pool_lbl.set_xalign(0)
+        self._pool_lbl.set_max_width_chars(12)
+        self._pool_lbl.set_ellipsize(Pango.EllipsizeMode.END)
         sidebar.append(self._pool_lbl)
 
         sidebar.append(_hdivider())
@@ -543,6 +544,8 @@ class AttractorWindow(Gtk.Window):
         cs_hdr = Gtk.Label(label="COMING SOON")
         cs_hdr.add_css_class("attractor-section-lbl")
         cs_hdr.set_xalign(0)
+        cs_hdr.set_max_width_chars(12)
+        cs_hdr.set_ellipsize(Pango.EllipsizeMode.END)
         sidebar.append(cs_hdr)
 
         # Build 2 reusable card widgets; updated by _update_coming_soon_ui().
@@ -558,6 +561,8 @@ class AttractorWindow(Gtk.Window):
             tag_lbl = Gtk.Label(label="COMING SOON")
             tag_lbl.add_css_class("cs-card-tag")
             tag_lbl.set_xalign(0)
+            tag_lbl.set_max_width_chars(12)
+            tag_lbl.set_ellipsize(Pango.EllipsizeMode.END)
             card_box.append(tag_lbl)
 
             prompt_lbl = Gtk.Label(label="")
@@ -588,12 +593,15 @@ class AttractorWindow(Gtk.Window):
         next_tag = Gtk.Label(label="NEXT ON TT-TV")
         next_tag.add_css_class("next-card-tag")
         next_tag.set_xalign(0)
+        next_tag.set_max_width_chars(12)
+        next_tag.set_ellipsize(Pango.EllipsizeMode.END)
         next_card.append(next_tag)
 
         self._next_thumb = Gtk.Picture()
         self._next_thumb.set_content_fit(Gtk.ContentFit.CONTAIN)
-        self._next_thumb.set_size_request(-1, 60)
-        self._next_thumb.set_hexpand(True)
+        self._next_thumb.set_size_request(1, 60)  # width=1: don't drive sidebar width
+        self._next_thumb.set_hexpand(False)
+        self._next_thumb.set_halign(Gtk.Align.FILL)
         self._next_thumb.set_vexpand(True)
         next_card.append(self._next_thumb)
 
