@@ -171,7 +171,7 @@ _CSS = b"""
     background-color: @tt_bg_darkest;
     border-right: 1px solid @tt_border;
     padding: 8px 8px;
-    min-width: 96px;
+    min-width: 84px;
 }
 .attractor-header {
     color: @tt_accent;
@@ -516,7 +516,7 @@ class AttractorWindow(Gtk.Window):
         # ── Sidebar ───────────────────────────────────────────────────────
         sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         sidebar.add_css_class("attractor-sidebar")
-        sidebar.set_size_request(96, -1)
+        sidebar.set_size_request(84, -1)
         sidebar.set_hexpand(False)
         sidebar.set_vexpand(True)
 
