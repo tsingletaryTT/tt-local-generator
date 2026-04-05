@@ -113,6 +113,42 @@ class AttractorPool:
         self._order.insert(insert_at, new_idx)
         self._recalc_duration()
 
+    def remove_record(self, record_id: str) -> bool:
+        """
+        Remove a record by ID.  Adjusts _order and index references so the
+        remaining records continue to play in the correct shuffled order.
+        Returns True if the record was found and removed, False otherwise.
+        """
+        idx = next(
+            (i for i, r in enumerate(self._records)
+             if getattr(r, "id", None) == record_id),
+            None,
+        )
+        if idx is None:
+            return False
+
+        self._records.pop(idx)
+
+        # Remap _order: drop entries pointing at idx, shift entries > idx down by 1.
+        new_order = []
+        for o in self._order:
+            if o == idx:
+                continue          # removed item — skip
+            new_order.append(o - 1 if o > idx else o)
+        self._order = new_order
+
+        # _pos may now point past the end of a shortened order; cap it.
+        self._pos = min(self._pos, len(self._order))
+
+        # Remap _last_idx.
+        if self._last_idx == idx:
+            self._last_idx = None
+        elif self._last_idx is not None and self._last_idx > idx:
+            self._last_idx -= 1
+
+        self._recalc_duration()
+        return True
+
     @property
     def avg_video_duration(self) -> float:
         """Mean duration of video records, or 8.0 s if none exist."""
@@ -1143,6 +1179,27 @@ class AttractorWindow(Gtk.Window):
             # If start() hasn't fired yet (add_record raced ahead via idle_add),
             # defer to start() which will see pool.size > 0 and call _advance().
             self._advance()
+
+    def remove_record(self, record) -> None:
+        """
+        Called (on the main thread) when the user deletes a record from the
+        main window gallery while TT-TV is open. Removes the item from the
+        playback pool so it no longer appears in future advance() calls.
+        The currently-playing video is unaffected; if it happens to be the
+        deleted record it will finish naturally before the pool skips it.
+        """
+        if not self._alive:
+            return
+        record_id = getattr(record, "id", None)
+        if record_id is None:
+            return
+        removed = self._pool.remove_record(record_id)
+        if removed:
+            self._pool_lbl.set_label(f"🎬  pool: {self._pool.size}")
+            self._hud_pool_lbl.set_label(f"pool: {self._pool.size}")
+            self._update_next_thumb()
+            _log.info("record removed from pool: %s  (pool now %d)",
+                      record_id, self._pool.size)
 
     # ── Channel-change transition ─────────────────────────────────────────
 

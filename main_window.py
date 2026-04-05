@@ -2809,7 +2809,9 @@ class ControlPanel(Gtk.Box):
         # Either condition means the server responded to the health check.
         # detect_running_model() can return None even when ready, so check both.
         server_reachable = self._server_ready or self._running_model is not None
-        self._recover_btn.set_sensitive(server_reachable and not self._busy and not self._server_launching)
+        # Recovery is safe while a generation is running — _attach_recovery_job
+        # enqueues at the front when busy rather than starting a second worker.
+        self._recover_btn.set_sensitive(server_reachable and not self._server_launching)
 
     # ── Seed image ─────────────────────────────────────────────────────────────
 
@@ -3666,6 +3668,9 @@ class MainWindow(Gtk.ApplicationWindow):
         self._gallery_for_type(record.media_type).delete_card(record.id)
         if self._detail._record is not None and self._detail._record.id == record.id:
             self._detail.clear()
+        # Sync deletion with the TT-TV pool so it stops trying to play the file.
+        if self._attractor_win is not None:
+            self._attractor_win.remove_record(record)
         short = record.prompt[:50] + ("…" if len(record.prompt) > 50 else "")
         self._set_status(f'Deleted: "{short}"')
 
