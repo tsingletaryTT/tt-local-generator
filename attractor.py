@@ -493,12 +493,13 @@ class AttractorWindow(Gtk.Window):
         _log.info("=== Attractor stopped ===\n%s", "".join(traceback.format_stack()))
         self._gen_stop.set()
         self._att_poll_stop.set()
-        # Unsubscribe from screensaver D-Bus signal.
-        if getattr(self, "_dbus_conn", None) and getattr(self, "_dbus_sub_id", 0):
-            try:
-                self._dbus_conn.signal_unsubscribe(self._dbus_sub_id)
-            except Exception:
-                pass
+        # Unsubscribe from screensaver D-Bus signals.
+        if getattr(self, "_dbus_conn", None):
+            for sub_id in getattr(self, "_dbus_sub_ids", []):
+                try:
+                    self._dbus_conn.signal_unsubscribe(sub_id)
+                except Exception:
+                    pass
         if self._pending_advance_source is not None:
             GLib.source_remove(self._pending_advance_source)
             self._pending_advance_source = None
@@ -766,56 +767,120 @@ class AttractorWindow(Gtk.Window):
         threading.Thread(target=self._att_status_poll_loop, daemon=True).start()
 
     def _subscribe_screensaver(self) -> None:
-        """Subscribe to the org.freedesktop.ScreenSaver D-Bus signal so we can
-        pause GStreamer before the display is locked.
+        """Subscribe to screen-lock signals from every known source.
 
-        Without this, VA-API/GBM video decoding can segfault when the kernel
-        DRM device becomes inaccessible during a lock-screen transition.
-        KDE, GNOME, and most compositors implement this standard interface.
+        Three layers of coverage:
+        1. org.freedesktop.ScreenSaver.ActiveChanged at /ScreenSaver
+           — KDE Plasma (kscreenlocker)
+        2. org.freedesktop.ScreenSaver.ActiveChanged at /org/freedesktop/ScreenSaver
+           — GNOME, Cinnamon, and most other DEs
+        3. org.gnome.ScreenSaver.ActiveChanged at /org/gnome/ScreenSaver
+           — older GNOME / Cinnamon legacy
+        4. org.freedesktop.login1.Session.Lock / Unlock on the SYSTEM bus
+           — universal: fires regardless of DE because it goes through the
+             kernel session manager (systemd-logind). Covers any compositor
+             that calls loginctl lock-session (Sway, Hyprland, custom scripts, etc.)
+
+        Without this, the compositor revokes DRM/VA-API access while GStreamer
+        pipelines are still running, triggering thousands of gst_poll assertion
+        failures per second that exhaust GLib's pipe-creation and kill the process.
         """
+        self._dbus_conn = None
+        self._dbus_sys_conn = None
+        self._dbus_sub_ids: list[int] = []
+        self._screen_locked = False   # dedup: ignore duplicate lock/unlock signals
+
+        # ── Session bus: ScreenSaver ActiveChanged (KDE, GNOME, etc.) ─────
         try:
             bus = Gio.bus_get_sync(Gio.BusType.SESSION, None)
-            self._dbus_conn = bus          # keep reference alive
-            self._dbus_sub_id = bus.signal_subscribe(
-                None,                                      # any sender
-                "org.freedesktop.ScreenSaver",
-                "ActiveChanged",
-                "/org/freedesktop/ScreenSaver",
-                None,
-                Gio.DBusSignalFlags.NONE,
-                self._on_screensaver_changed,
-            )
-            _log.debug("screensaver D-Bus subscription OK (sub_id=%d)", self._dbus_sub_id)
+            self._dbus_conn = bus
+            for iface, path in (
+                ("org.freedesktop.ScreenSaver", "/ScreenSaver"),
+                ("org.freedesktop.ScreenSaver", "/org/freedesktop/ScreenSaver"),
+                ("org.gnome.ScreenSaver",        "/org/gnome/ScreenSaver"),
+            ):
+                sub_id = bus.signal_subscribe(
+                    None, iface, "ActiveChanged", path, None,
+                    Gio.DBusSignalFlags.NONE,
+                    self._on_screensaver_active_changed,
+                )
+                self._dbus_sub_ids.append(sub_id)
+            _log.debug("screensaver session-bus subscriptions OK (sub_ids=%s)",
+                       self._dbus_sub_ids)
         except Exception as exc:
-            _log.warning("screensaver D-Bus subscription failed (non-fatal): %s", exc)
-            self._dbus_conn = None
-            self._dbus_sub_id = 0
+            _log.warning("screensaver session-bus subscription failed: %s", exc)
 
-    def _on_screensaver_changed(self, _conn, _sender, _path, _iface, _signal, params, _udata):
-        """Screensaver activated/deactivated — pause or resume GStreamer accordingly."""
+        # ── System bus: logind Lock / Unlock (universal fallback) ──────────
+        try:
+            sys_bus = Gio.bus_get_sync(Gio.BusType.SYSTEM, None)
+            self._dbus_sys_conn = sys_bus
+            for signal, lock in (("Lock", True), ("Unlock", False)):
+                sub_id = sys_bus.signal_subscribe(
+                    "org.freedesktop.login1",
+                    "org.freedesktop.login1.Session",
+                    signal,
+                    None,          # any session path
+                    None,
+                    Gio.DBusSignalFlags.NONE,
+                    self._on_logind_lock_signal,
+                )
+                self._dbus_sub_ids.append(sub_id)
+            _log.debug("screensaver logind system-bus subscriptions OK")
+        except Exception as exc:
+            _log.warning("screensaver logind system-bus subscription failed: %s", exc)
+
+    def _on_screensaver_active_changed(self, _c, _s, _p, _i, _sig, params, _u):
+        """Callback for ScreenSaver.ActiveChanged(bool) — session bus."""
         if not self._alive:
             return
-        active = params[0]   # GLib.Variant bool
+        self._on_screen_lock(bool(params[0]))
+
+    def _on_logind_lock_signal(self, _c, _s, _p, _i, signal, _params, _u):
+        """Callback for logind Session.Lock / Session.Unlock — system bus."""
+        if not self._alive:
+            return
+        self._on_screen_lock(signal == "Lock")
+
+    def _on_screen_lock(self, active: bool) -> None:
+        """Unified lock/unlock handler — called from any signal source.
+
+        On lock:   fully unload both A/B video slots so GStreamer releases all
+                   DRM/VA-API/Wayland surface handles before the compositor takes
+                   exclusive control.  Advance and unload timers are also cancelled
+                   so nothing tries to open a new pipeline while locked.
+        On unlock: reload the last-played record into the active slot and restart
+                   the advance schedule.
+
+        The _screen_locked flag deduplicates signals from multiple sources
+        (e.g., both logind.Lock and ScreenSaver.ActiveChanged may fire).
+        """
+        if active == self._screen_locked:
+            return  # already in this state — duplicate signal, ignore
+        self._screen_locked = active
+
         if active:
-            # Lock screen about to obscure display — pause pipeline to release
-            # DRM/VA-API resources before the compositor revokes access.
-            stream = self._get_current_video_stream()
-            if stream is not None:
-                try:
-                    stream.pause()
-                except Exception:
-                    pass
-            _log.info("screensaver active - GStreamer paused")
+            # Cancel pending timers first so _advance() can't fire mid-teardown.
+            if self._pending_advance_source is not None:
+                GLib.source_remove(self._pending_advance_source)
+                self._pending_advance_source = None
+            if self._pending_unload_source:
+                GLib.source_remove(self._pending_unload_source)
+                self._pending_unload_source = 0
+            _unload_slot_video(self._slot_a)
+            _unload_slot_video(self._slot_b)
+            self._slot_to_unload = None
+            _log.info("screen locked - all GStreamer pipelines released")
         else:
-            # Unlocked — resume only if user hasn't manually paused via Space.
-            if not self._paused:
-                stream = self._get_current_video_stream()
-                if stream is not None:
-                    try:
-                        stream.play()
-                    except Exception:
-                        pass
-            _log.info("screensaver inactive - GStreamer resumed")
+            _log.info("screen unlocked - reloading video")
+            try:
+                record = self._pool.current_record()
+                active_slot = self._slot_b if self._active_slot_name == "b" else self._slot_a
+                self._load_slot(active_slot, record)
+                if not self._paused:
+                    self._schedule_advance(record)
+            except RuntimeError:
+                # current_record() raises before first advance() — safe to skip.
+                pass
 
     def _advance(self) -> None:
         """
