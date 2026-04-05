@@ -1,0 +1,437 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: © 2025 Tenstorrent AI ULC
+"""
+tt-ctl — lightweight CLI for tt-local-generator.
+
+Works without the GUI running.  Reads and writes the same queue.json /
+history.json files that the GUI persists on every mutation.
+
+Usage:
+    tt-ctl status                   Server health, queue depth, history summary
+    tt-ctl queue                    List pending queue items
+    tt-ctl queue add "prompt"       Append a prompt to the persistent queue
+    tt-ctl queue clear              Empty the queue (does not cancel in-flight jobs)
+    tt-ctl history [N]              Show last N completed generations (default 10)
+    tt-ctl recover                  List server jobs not in local history
+    tt-ctl run "prompt"             Run one generation right now (blocking)
+                                    Flags: --steps N  --model wan2|mochi|flux
+                                           --server URL  --neg "negative prompt"
+    tt-ctl server                   Show server model / health detail
+
+All commands accept --server URL to override the default http://localhost:8000.
+"""
+
+import argparse
+import json
+import os
+import sys
+import textwrap
+import threading
+from datetime import datetime
+from pathlib import Path
+
+# ── Make sure the project root is importable ──────────────────────────────────
+_HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(_HERE))
+
+from api_client import APIClient          # noqa: E402
+from history_store import HistoryStore    # noqa: E402
+from worker import GenerationWorker       # noqa: E402
+
+
+# ── Colour helpers (plain text when stdout is not a tty) ──────────────────────
+
+def _tty():
+    return sys.stdout.isatty()
+
+def _c(code, text):
+    return f"\033[{code}m{text}\033[0m" if _tty() else text
+
+def green(t):  return _c("32", t)
+def yellow(t): return _c("33", t)
+def red(t):    return _c("31", t)
+def teal(t):   return _c("36", t)
+def bold(t):   return _c("1",  t)
+def dim(t):    return _c("2",  t)
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _make_client(args) -> APIClient:
+    url = getattr(args, "server", "http://localhost:8000")
+    return APIClient(base_url=url)
+
+
+def _wrap(text: str, width: int = 80, indent: str = "  ") -> str:
+    return textwrap.fill(text, width=width, initial_indent=indent,
+                         subsequent_indent=indent)
+
+
+def _age(iso: str) -> str:
+    """Human-readable age from an ISO 8601 timestamp."""
+    try:
+        dt = datetime.fromisoformat(iso)
+        delta = datetime.now() - dt
+        s = int(delta.total_seconds())
+        if s < 60:
+            return f"{s}s ago"
+        if s < 3600:
+            return f"{s//60}m ago"
+        if s < 86400:
+            return f"{s//3600}h ago"
+        return f"{s//86400}d ago"
+    except Exception:
+        return ""
+
+
+# ── status ────────────────────────────────────────────────────────────────────
+
+def cmd_status(args):
+    client = _make_client(args)
+    store  = HistoryStore()
+    queue  = store.load_queue()
+    recs   = store.all_records()
+
+    # Server
+    print(bold("Server"))
+    alive = client.health_check()
+    if alive:
+        model = client.detect_running_model()
+        ready = client.model_ready()
+        dot   = green("●") if ready else yellow("●")
+        label = model if model else ("ready" if ready else "up, model loading")
+        print(f"  {dot}  {client.base_url}  —  {label}")
+    else:
+        print(f"  {red('●')}  {client.base_url}  —  offline")
+
+    # Queue
+    print()
+    print(bold("Queue"))
+    if not queue:
+        print(dim("  (empty)"))
+    else:
+        for i, item in enumerate(queue):
+            tag   = teal(f"[{i}]")
+            model = item.get("model_source", "video")
+            short = item.get("prompt", "")[:80]
+            if len(item.get("prompt", "")) > 80:
+                short += "…"
+            print(f"  {tag} {dim(model)}  {short}")
+
+    # History summary
+    videos = [r for r in recs if r.media_type == "video"]
+    images = [r for r in recs if r.media_type == "image"]
+    recent = recs[-1] if recs else None
+    print()
+    print(bold("History"))
+    print(f"  {len(recs)} records  ({len(videos)} video, {len(images)} image)")
+    if recent:
+        age = _age(recent.created_at)
+        short = recent.prompt[:70] + ("…" if len(recent.prompt) > 70 else "")
+        print(f"  last: {dim(age)}  {short}")
+
+
+# ── queue ─────────────────────────────────────────────────────────────────────
+
+def cmd_queue(args):
+    store = HistoryStore()
+    queue = store.load_queue()
+
+    sub = getattr(args, "queue_cmd", None)
+
+    if sub == "add":
+        item = {
+            "prompt":          args.prompt,
+            "negative_prompt": getattr(args, "neg", ""),
+            "steps":           getattr(args, "steps", 30),
+            "seed":            getattr(args, "seed", -1),
+            "seed_image_path": "",
+            "model_source":    getattr(args, "model", "video"),
+            "guidance_scale":  5.0,
+            "ref_video_path":  "",
+            "ref_char_path":   "",
+            "animate_mode":    "animation",
+            "model_id":        "",
+            "job_id_override": "",
+        }
+        queue.append(item)
+        store.save_queue(queue)
+        print(green("✓") + f"  Added to queue (position {len(queue)-1})")
+        print(_wrap(args.prompt))
+
+    elif sub == "clear":
+        n = len(queue)
+        store.save_queue([])
+        print(green("✓") + f"  Cleared {n} item(s) from queue")
+
+    else:
+        # default: list
+        if not queue:
+            print(dim("Queue is empty."))
+            return
+        print(bold(f"Queue  ({len(queue)} item{'s' if len(queue)!=1 else ''})"))
+        for i, item in enumerate(queue):
+            model = item.get("model_source", "video")
+            steps = item.get("steps", "?")
+            seed  = item.get("seed", -1)
+            print(f"\n  {teal(f'[{i}]')} {dim(model)}  steps={steps}  seed={seed}")
+            print(_wrap(item.get("prompt", "(no prompt)")))
+
+
+# ── history ───────────────────────────────────────────────────────────────────
+
+def cmd_history(args):
+    store = HistoryStore()
+    recs  = store.all_records()
+    n     = getattr(args, "n", 10)
+    shown = recs[-n:][::-1]   # newest first
+
+    if not shown:
+        print(dim("No history yet."))
+        return
+
+    print(bold(f"Last {len(shown)} generation(s)"))
+    for r in shown:
+        age    = _age(r.created_at)
+        exists = green("✓") if r.media_exists else red("✗")
+        model  = dim(r.model or r.media_type)
+        gen    = dim(f"{r.duration_s:.0f}s gen") if r.duration_s else ""
+        print(f"\n  {exists} {dim(age)}  {model}  {gen}")
+        print(_wrap(r.prompt))
+        if r.media_exists:
+            print(dim(f"     {r.media_file_path}"))
+        else:
+            print(red(f"     FILE MISSING: {r.media_file_path}"))
+
+
+# ── server ────────────────────────────────────────────────────────────────────
+
+def cmd_server(args):
+    client = _make_client(args)
+
+    alive = client.health_check()
+    if not alive:
+        print(f"{red('●')}  {client.base_url}  —  offline")
+        return
+
+    model = client.detect_running_model()
+    ready = client.model_ready()
+    dot   = green("●") if ready else yellow("●")
+    print(f"{dot}  {client.base_url}")
+    print(f"   model : {model or dim('(not detected)')}")
+    print(f"   ready : {'yes' if ready else 'loading…'}")
+
+    try:
+        jobs = client.list_jobs()
+        print(f"   jobs  : {len(jobs)} on server")
+        for j in jobs[:5]:
+            jid    = j.get("id", "?")[:12]
+            status = j.get("status", "?")
+            prompt = (j.get("prompt") or j.get("request", {}).get("prompt") or "")[:60]
+            col    = green if status in ("completed", "succeeded") else (
+                      red   if status in ("failed", "error")       else yellow)
+            print(f"           {col(status):12s}  {dim(jid)}  {prompt}")
+        if len(jobs) > 5:
+            print(dim(f"           … and {len(jobs)-5} more"))
+    except Exception as exc:
+        print(dim(f"   (could not list jobs: {exc})"))
+
+
+# ── recover ───────────────────────────────────────────────────────────────────
+
+def cmd_recover(args):
+    """List server jobs whose IDs don't appear in local history.
+
+    Does not modify anything — prints the job IDs and prompts so you can
+    decide what to do.  To actually recover, the GUI's Recover button uses
+    these same IDs via the AttachRecoveryJob flow.
+    """
+    client = _make_client(args)
+    store  = HistoryStore()
+
+    alive = client.health_check()
+    if not alive:
+        print(red("Server offline — cannot scan jobs."))
+        sys.exit(1)
+
+    known_ids = {r.id for r in store.all_records()}
+
+    try:
+        jobs = client.list_jobs()
+    except Exception as exc:
+        print(red(f"Failed to list jobs: {exc}"))
+        sys.exit(1)
+
+    unknown = [j for j in jobs if j.get("id") not in known_ids]
+
+    if not unknown:
+        print(green("✓") + "  All server jobs are in local history.")
+        return
+
+    print(bold(f"{len(unknown)} unknown job(s) on server:"))
+    for j in unknown:
+        jid    = j.get("id", "?")
+        status = j.get("status", "?")
+        prompt = (j.get("prompt") or j.get("request", {}).get("prompt") or "")[:80]
+        col    = green if status in ("completed", "succeeded") else (
+                  red   if status in ("failed", "error")       else yellow)
+        print(f"\n  {col(status):12s}  {dim(jid)}")
+        if prompt:
+            print(_wrap(prompt))
+
+    print()
+    print(dim("To recover: open the GUI and click '⟳ Recover Jobs', or requeue "
+              "the prompt with:  tt-ctl queue add \"<prompt>\""))
+
+
+# ── run ───────────────────────────────────────────────────────────────────────
+
+def cmd_run(args):
+    """Run one generation synchronously, writing to the shared history."""
+    client = _make_client(args)
+
+    alive = client.health_check()
+    if not alive:
+        print(red("Server offline."))
+        sys.exit(1)
+
+    if not client.model_ready():
+        print(yellow("Server is up but model is still loading — try again shortly."))
+        sys.exit(1)
+
+    store  = HistoryStore()
+    prompt = args.prompt
+    steps  = getattr(args, "steps", 30)
+    seed   = getattr(args, "seed",  -1)
+    neg    = getattr(args, "neg",   "")
+    model_src = getattr(args, "model", "video")
+
+    print(bold("Submitting generation"))
+    print(_wrap(prompt))
+    print(dim(f"  steps={steps}  seed={seed}  model={model_src}"))
+    print()
+
+    done   = threading.Event()
+    result = {}
+
+    def on_progress(msg: str):
+        print(dim(f"  {msg}"))
+
+    def on_finished(record):
+        result["record"] = record
+        done.set()
+
+    def on_error(msg: str):
+        result["error"] = msg
+        done.set()
+
+    worker = GenerationWorker(
+        client=client,
+        store=store,
+        prompt=prompt,
+        negative_prompt=neg,
+        num_inference_steps=steps,
+        seed=seed,
+        model=model_src,
+    )
+    t = threading.Thread(
+        target=worker.run_with_callbacks,
+        kwargs=dict(
+            on_progress=on_progress,
+            on_finished=on_finished,
+            on_error=on_error,
+        ),
+        daemon=True,
+    )
+    t.start()
+
+    try:
+        done.wait()
+    except KeyboardInterrupt:
+        worker.cancel()
+        print(yellow("\nCancelled."))
+        sys.exit(1)
+
+    if "error" in result:
+        print(red(f"\nError: {result['error']}"))
+        sys.exit(1)
+
+    record = result["record"]
+    # worker already called store.append(record) internally
+    print(green("\n✓ Done"))
+    print(f"  {record.media_file_path}")
+    print(dim(f"  gen time: {record.duration_s:.0f}s  |  model: {record.model}"))
+
+
+# ── arg parsing ───────────────────────────────────────────────────────────────
+
+def _build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="tt-ctl",
+        description="CLI for tt-local-generator — works without the GUI.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument("--server", default="http://localhost:8000",
+                   help="Inference server URL (default: http://localhost:8000)")
+
+    sub = p.add_subparsers(dest="cmd", metavar="COMMAND")
+
+    # status
+    sub.add_parser("status", help="Server health, queue depth, history summary")
+
+    # queue
+    q = sub.add_parser("queue", help="Manage the persistent queue")
+    qsub = q.add_subparsers(dest="queue_cmd", metavar="SUBCOMMAND")
+    qa = qsub.add_parser("add", help="Append a prompt to the queue")
+    qa.add_argument("prompt")
+    qa.add_argument("--model", default="video", choices=["video","image","animate"],
+                    help="Model type (default: video)")
+    qa.add_argument("--steps", type=int, default=30)
+    qa.add_argument("--seed",  type=int, default=-1)
+    qa.add_argument("--neg",   default="", metavar="NEG_PROMPT")
+    qsub.add_parser("clear", help="Empty the queue")
+
+    # history
+    h = sub.add_parser("history", help="Show recent completed generations")
+    h.add_argument("n", nargs="?", type=int, default=10,
+                   metavar="N", help="How many to show (default 10)")
+
+    # server
+    sub.add_parser("server", help="Server detail and job list")
+
+    # recover
+    sub.add_parser("recover", help="List server jobs not in local history")
+
+    # run
+    r = sub.add_parser("run", help="Run one generation now (blocking)")
+    r.add_argument("prompt")
+    r.add_argument("--steps", type=int, default=30)
+    r.add_argument("--seed",  type=int, default=-1)
+    r.add_argument("--neg",   default="", metavar="NEG_PROMPT")
+    r.add_argument("--model", default="video", choices=["video","image","animate"])
+
+    return p
+
+
+def main():
+    parser = _build_parser()
+    args   = parser.parse_args()
+
+    if args.cmd is None:
+        parser.print_help()
+        return
+
+    dispatch = {
+        "status":  cmd_status,
+        "queue":   cmd_queue,
+        "history": cmd_history,
+        "server":  cmd_server,
+        "recover": cmd_recover,
+        "run":     cmd_run,
+    }
+    dispatch[args.cmd](args)
+
+
+if __name__ == "__main__":
+    main()
