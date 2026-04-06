@@ -668,19 +668,24 @@ _MODEL_DISPLAY: dict = {
 # full CINEMATIC_DIRECTORS string that actually goes into the prompt slug.
 # "Random" (empty key) means sample from the full list based on director_style_prob.
 _DIRECTOR_PINS: list[tuple[str, str]] = [
-    ("Random", ""),
-    ("Kubrick",     "Kubrick — tight frame, obsessive detail, cold symmetry"),
-    ("Tarkovsky",   "Tarkovsky — slow-burn long take, transcendent water and fire"),
-    ("Fellini",     "Fellini — carnival dreamscape, baroque crowd, memory dissolve"),
-    ("Hitchcock",   "Hitchcock — voyeuristic high-angle thriller, chiaroscuro"),
-    ("Kurosawa",    "Kurosawa — widescreen epic in driving rain, weather as emotion"),
-    ("Wong Kar-wai","Wong Kar-wai — neon overexposure, slow-motion missed connection"),
-    ("Bergman",     "Bergman — faces in extreme close-up, death as quiet presence"),
-    ("Godard",      "Godard — jump cut, primary color wall, direct address"),
-    ("Varda",       "Varda — tender personal essay, sun-drenched beach, wry voice"),
-    ("Herzog",      "Herzog — obsession dwarfed by impossible landscape"),
-    ("Ozu",         "Ozu — tatami-level static, family at table, pillow shot"),
-    ("Antonioni",   "Antonioni — alienated figure in stark modern architecture"),
+    ("Random",          ""),
+    ("Hitchcock",       "Hitchcock — voyeuristic high-angle thriller, chiaroscuro"),
+    ("Spielberg",       "Spielberg — golden-hour backlit silhouette, kinetic wonder, child's-eye rack-focus reveal"),
+    ("Penny Marshall",  "Penny Marshall — warm ensemble Americana, naturalistic ensemble blocking, working-class tenderness"),
+    ("Roger Corman",    "Roger Corman — garish B-movie color, Gothic camp excess, drive-in spectacle on a shoestring"),
+    ("Mel Brooks",      "Mel Brooks — vaudevillian sight gag, wide parody staging, anachronistic wink at the camera"),
+    ("Sofia Coppola",   "Sofia Coppola — luxury melancholy, feminine interior silence"),
+    ("Kubrick",         "Kubrick — tight frame, obsessive detail, cold symmetry"),
+    ("Tarkovsky",       "Tarkovsky — slow-burn long take, transcendent water and fire"),
+    ("Fellini",         "Fellini — carnival dreamscape, baroque crowd, memory dissolve"),
+    ("Kurosawa",        "Kurosawa — widescreen epic in driving rain, weather as emotion"),
+    ("Wong Kar-wai",    "Wong Kar-wai — neon overexposure, slow-motion missed connection"),
+    ("Bergman",         "Bergman — faces in extreme close-up, death as quiet presence"),
+    ("Godard",          "Godard — jump cut, primary color wall, direct address"),
+    ("Varda",           "Varda — tender personal essay, sun-drenched beach, wry voice"),
+    ("Herzog",          "Herzog — obsession dwarfed by impossible landscape"),
+    ("Ozu",             "Ozu — tatami-level static, family at table, pillow shot"),
+    ("Antonioni",       "Antonioni — alienated figure in stark modern architecture"),
 ]
 # Reverse map: full string → display name (for restoring menu state from settings)
 _DIRECTOR_PIN_LABEL: dict[str, str] = {v: k for k, v in _DIRECTOR_PINS}
