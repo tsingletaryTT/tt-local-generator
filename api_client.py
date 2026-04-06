@@ -100,11 +100,13 @@ class APIClient:
         Check if the server is running and responsive.
 
         Returns True if the server replies 200 to /tt-liveness.
+        Timeout is generous (15 s) because the server can be slow to respond
+        while the TT hardware is saturated during active inference.
         """
         try:
             resp = requests.get(
                 f"{self.base_url}/tt-liveness",
-                timeout=5,
+                timeout=15,
                 headers=self._headers(),
             )
             return resp.status_code == 200

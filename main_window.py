@@ -4311,14 +4311,39 @@ class MainWindow(Gtk.ApplicationWindow):
         self._health_thread.start()
 
     def _health_loop(self) -> None:
-        """Runs on background thread. Posts UI updates via GLib.idle_add."""
+        """Runs on background thread. Posts UI updates via GLib.idle_add.
+
+        Requires two consecutive failed pings before reporting offline so that
+        a single slow response (e.g. TT chip saturated during active inference)
+        doesn't flip the UI dot to red.  A successful ping resets the counter
+        immediately.
+        """
+        consecutive_failures = 0
+        last_reported_ready: "bool | None" = None
+
         while not self._health_stop.is_set():
             ready = self._client.health_check()
             running_model: "str | None" = None
+
             if ready:
+                consecutive_failures = 0
                 running_model = self._client.detect_running_model()
-            # THREADING: must not touch GTK widgets here — post to main thread
-            GLib.idle_add(self._on_health_result, ready, running_model)
+            else:
+                consecutive_failures += 1
+                if consecutive_failures < 2:
+                    # First miss — don't flip UI yet; wait for the next poll.
+                    self._health_stop.wait(10.0)
+                    continue
+
+            # Only post a result when the state has changed or we just came up.
+            # This avoids redundant idle_add calls every 10 s while steady.
+            if ready != last_reported_ready:
+                last_reported_ready = ready
+                GLib.idle_add(self._on_health_result, ready, running_model)
+            elif ready and running_model is not None:
+                # Model may have changed (e.g. server restarted with different model).
+                GLib.idle_add(self._on_health_result, ready, running_model)
+
             self._health_stop.wait(10.0)
 
     def _on_health_result(self, ready: bool, running_model: "str | None") -> bool:
