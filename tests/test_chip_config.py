@@ -1,6 +1,6 @@
 """Tests for chip_config.py — zero GTK dependencies."""
 import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "app"))
 
 import pytest
 from pathlib import Path

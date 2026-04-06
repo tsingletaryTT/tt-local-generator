@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / "app"))
 
 import pytest
 import requests
@@ -76,11 +76,15 @@ def test_generate_prompt_falls_back_to_algo_when_llm_down():
 
 
 def test_generate_prompt_accepts_all_source_types():
-    """All three source types pass through correctly."""
+    """All three source types pass through correctly with the right prompt_type."""
     for src in ("video", "image", "animate"):
         with patch("generate_prompt.generate", return_value={"prompt": "ok", "source": "algo"}) as m:
             prompt_client.generate_prompt(src)
-            m.assert_called_once_with(prompt_type=src, mode="markov", enhance=True)
+            m.assert_called_once()
+            kwargs = m.call_args.kwargs
+            assert kwargs.get("prompt_type") == src
+            assert kwargs.get("mode") == "markov"
+            assert kwargs.get("enhance") is True
 
 
 # ── generate_prompt — with seed (inspire mode with existing text) ─────────────
@@ -106,7 +110,11 @@ def test_generate_prompt_with_seed_falls_through_to_algo_when_llm_down():
          patch("generate_prompt.generate", return_value={"prompt": algo_result, "source": "algo"}) as m:
         result = prompt_client.generate_prompt("video", seed)
     assert result == algo_result
-    m.assert_called_once_with(prompt_type="video", mode="markov", enhance=True)
+    m.assert_called_once()
+    kwargs = m.call_args.kwargs
+    assert kwargs.get("prompt_type") == "video"
+    assert kwargs.get("mode") == "markov"
+    assert kwargs.get("enhance") is True
 
 
 def test_generate_prompt_with_seed_falls_through_to_algo_when_polish_fails():
@@ -118,7 +126,11 @@ def test_generate_prompt_with_seed_falls_through_to_algo_when_polish_fails():
          patch("generate_prompt.generate", return_value={"prompt": algo_result, "source": "algo"}) as m:
         result = prompt_client.generate_prompt("video", seed)
     assert result == algo_result
-    m.assert_called_once_with(prompt_type="video", mode="markov", enhance=True)
+    m.assert_called_once()
+    kwargs = m.call_args.kwargs
+    assert kwargs.get("prompt_type") == "video"
+    assert kwargs.get("mode") == "markov"
+    assert kwargs.get("enhance") is True
 
 
 def test_generate_prompt_with_seed_strips_whitespace_for_llm():

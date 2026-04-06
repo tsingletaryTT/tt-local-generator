@@ -190,10 +190,28 @@ def _algo_animate() -> tuple[str, dict]:
     return slug, meta
 
 
+def _algo_commercial() -> tuple[str, dict]:
+    """
+    Build one algorithmic commercial/product-spot prompt slug.
+
+    Commercial prompts foreground the product — a specific object, package, or
+    mail-order novelty — and frame it with a product-shot camera directive.
+    The LLM polishing pass is told to keep the product central and not drift
+    into narrative.
+    """
+    product = wb.commercial_product()
+    sett = wb.commercial_setting()
+    hook = wb.commercial_copy_hook()
+    slug = f"{product}, {sett}, {hook}"
+    meta = {"product": product, "setting": sett, "copy_hook": hook}
+    return slug, meta
+
+
 _ALGO_FN = {
     "video": _algo_video,
     "image": _algo_image,
     "animate": _algo_animate,
+    "commercial": _algo_commercial,
 }
 
 # ── LLM polish ─────────────────────────────────────────────────────────────────
@@ -217,6 +235,10 @@ _TYPE_HINT = {
     "image": "Image. End with 2-3 style tags (e.g. 35mm grain, sharp focus). Under 28 words.",
     "animate": (
         "Character animation. One character, one action, one emotional beat. Under 22 words."
+    ),
+    "commercial": (
+        "Product commercial (4-6 s clip). Keep the product the subject. "
+        "One camera move, one product action. Focus on the object, not people. Under 25 words."
     ),
 }
 
@@ -322,7 +344,7 @@ def generate(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate video/image/animate prompts (algo → markov → LLM).",
+        description="Generate video/image/animate/commercial prompts (algo → markov → LLM).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
@@ -334,7 +356,7 @@ Examples:
         """,
     )
     parser.add_argument(
-        "--type", choices=["video", "image", "animate"], default="video",
+        "--type", choices=["video", "image", "animate", "commercial"], default="video",
         help="Prompt type (default: video)",
     )
     parser.add_argument(

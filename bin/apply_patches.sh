@@ -18,7 +18,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PATCHES_SRC="$SCRIPT_DIR/patches"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+PATCHES_SRC="$REPO_ROOT/patches"
 
 # ── Args ─────────────────────────────────────────────────────────────────────
 
@@ -27,7 +28,10 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
     exit 0
 fi
 
-TT_INFER="${1:-$HOME/code/tt-inference-server}"
+# Default: prefer vendor/ inside the repo (portable), fall back to dev checkout.
+_DEFAULT_INFER="$REPO_ROOT/vendor/tt-inference-server"
+[[ -d "$_DEFAULT_INFER" ]] || _DEFAULT_INFER="$HOME/code/tt-inference-server"
+TT_INFER="${1:-$_DEFAULT_INFER}"
 
 if [[ ! -d "$TT_INFER" ]]; then
     echo "ERROR: tt-inference-server not found at $TT_INFER"
@@ -130,5 +134,140 @@ print("   inserted tt_dit hotpatch block ✓")
 PYEOF
 
 echo ""
+
+# ── Step 3: Copy patches/media_server_config/ ────────────────────────────────
+
+MSC_SRC="$PATCHES_SRC/media_server_config"
+MSC_DST="$TT_INFER/patches/media_server_config"
+
+echo "3. Copying $MSC_SRC → $MSC_DST"
+
+find "$MSC_SRC" -name "*.py" | while read -r src_file; do
+    rel="${src_file#$MSC_SRC/}"
+    dst_file="$MSC_DST/$rel"
+    dst_dir="$(dirname "$dst_file")"
+    mkdir -p "$dst_dir"
+
+    if [[ -f "$dst_file" ]]; then
+        if diff -q "$src_file" "$dst_file" > /dev/null 2>&1; then
+            echo "   unchanged: patches/media_server_config/$rel"
+        else
+            backup="${dst_file}.bak"
+            cp "$dst_file" "$backup"
+            echo "   updated:   patches/media_server_config/$rel  (backup: ${backup#$TT_INFER/})"
+            cp "$src_file" "$dst_file"
+        fi
+    else
+        echo "   created:   patches/media_server_config/$rel"
+        cp "$src_file" "$dst_file"
+    fi
+done
+
+echo ""
+
+# ── Step 4: Insert media_server_config bind-mount block ───────────────────────
+
+echo "4. Patching $RDS (media_server_config)"
+
+# Unconditional (no dev_mode guard): these config overrides must work with the
+# production image startup used by start_wan.sh.  Files under
+# patches/media_server_config/ mirror the container's ~/tt-metal/server/ tree
+# and are bind-mounted over the corresponding paths at container start.
+MSC_BLOCK='    # Apply media-server config patches: .py files under patches/media_server_config/
+    # mirror ~/tt-metal/server/ inside the container and are bind-mounted at startup.
+    # Unlike dev_mode hotpatches this block is unconditional — it works with the
+    # production image (no --dev-mode flag required).  Use this for config overrides
+    # such as per-device timeouts that are missing from the upstream image.
+    _media_config_patches_dir = Path(repo_root_path) / "patches" / "media_server_config"
+    if _media_config_patches_dir.is_dir():
+        for _patch_file in sorted(_media_config_patches_dir.rglob("*.py")):
+            _rel = _patch_file.relative_to(_media_config_patches_dir)
+            _dst = f"{user_home_path}/tt-metal/server/{_rel}"
+            docker_command += [
+                "--mount", f"type=bind,src={_patch_file},dst={_dst},readonly",
+            ]
+            logger.info(f"Config patch (media_server_config): {_rel} -> {_dst}")'
+
+python3 - "$RDS" "$MSC_BLOCK" <<'PYEOF'
+import sys, shutil, pathlib
+
+rds_path = pathlib.Path(sys.argv[1])
+block = sys.argv[2]
+
+text = rds_path.read_text()
+
+if "_media_config_patches_dir" in text:
+    print("   already patched — nothing to do")
+    sys.exit(0)
+
+ANCHOR = "    for key, value in docker_env_vars.items():"
+
+if ANCHOR not in text:
+    print(f"ERROR: could not find insertion anchor in {rds_path}")
+    sys.exit(1)
+
+backup = rds_path.with_suffix(".py.bak")
+shutil.copy2(rds_path, backup)
+print(f"   backup: {backup.name}")
+
+new_text = text.replace(ANCHOR, block + "\n\n" + ANCHOR, 1)
+rds_path.write_text(new_text)
+print("   inserted media_server_config bind-mount block ✓")
+PYEOF
+
+echo ""
+# ── Step 5: Insert HF_HOME bind-mount block ───────────────────────────────────
+
+echo "5. Patching $RDS (HF_HOME mount)"
+
+# When the model loading code calls from_pretrained("Wan-AI/Wan2.2-...") with the
+# HF repo ID (not a local path), the HF library resolves it via HF_HOME.  Without
+# setting HF_HOME inside the container, the library defaults to the container's own
+# empty ~/.cache/huggingface, causing a download attempt or offline-mode failure.
+# This block mounts the full host HF cache directory and sets HF_HOME so that the
+# cached model (118 GB) is found by repo ID without any network access.
+HF_HOME_BLOCK='    # Mount the full host HF cache as HF_HOME inside the container.
+    # Model loading code calls from_pretrained("Wan-AI/Wan2.2-T2V-A14B-Diffusers")
+    # with the HF repo ID; the HF library resolves this via HF_HOME.  Without this,
+    # HF defaults to the empty container cache and tries to download, or fails offline.
+    if setup_config and getattr(setup_config, "host_hf_cache", None):
+        _hf_home_dst = f"{user_home_path}/hf_home_cache"
+        docker_command += [
+            "--mount", f"type=bind,src={setup_config.host_hf_cache},dst={_hf_home_dst},readonly",
+        ]
+        docker_env_vars["HF_HOME"] = _hf_home_dst
+        logger.info(f"HF_HOME mount: {setup_config.host_hf_cache} -> {_hf_home_dst}")'
+
+python3 - "$RDS" "$HF_HOME_BLOCK" <<'PYEOF'
+import sys, shutil, pathlib
+
+rds_path = pathlib.Path(sys.argv[1])
+block = sys.argv[2]
+
+text = rds_path.read_text()
+
+if "hf_home_cache" in text:
+    print("   already patched — nothing to do")
+    sys.exit(0)
+
+ANCHOR = "    for key, value in docker_env_vars.items():"
+
+if ANCHOR not in text:
+    print(f"ERROR: could not find insertion anchor in {rds_path}")
+    sys.exit(1)
+
+backup = rds_path.with_suffix(".py.bak")
+shutil.copy2(rds_path, backup)
+print(f"   backup: {backup.name}")
+
+new_text = text.replace(ANCHOR, block + "\n\n" + ANCHOR, 1)
+rds_path.write_text(new_text)
+print("   inserted HF_HOME bind-mount block ✓")
+PYEOF
+
+echo ""
 echo "Done. You can now run start_mochi.sh (or any media-server model with --dev-mode)"
 echo "and the patches/tt_dit/ files will be bind-mounted automatically."
+echo ""
+echo "patches/media_server_config/ overrides are applied on every start_wan.sh launch"
+echo "(no --dev-mode required)."

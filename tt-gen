@@ -36,4 +36,4 @@ fi
 # GTK4 never tries to load any modules.
 export GTK_MODULES=""
 
-exec "$PYTHON" "$SCRIPT_DIR/main.py" "$@"
+exec "$PYTHON" "$SCRIPT_DIR/app/main.py" "$@"

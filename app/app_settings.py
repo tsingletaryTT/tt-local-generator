@@ -32,7 +32,7 @@ SETTINGS_FILE = STORAGE_DIR / "settings.json"
 
 DEFAULTS: dict = {
     # Generation quality
-    "quality_steps": 30,            # default inference steps loaded into the steps spin
+    "quality_steps": 20,            # default inference steps loaded into the steps spin
     # Sleep / power
     "sleep_after_n_gens": 0,        # 0 = never; N = call systemctl suspend after N completions
     # Screensaver

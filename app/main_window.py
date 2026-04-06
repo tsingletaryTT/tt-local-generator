@@ -43,6 +43,7 @@ from history_store import GenerationRecord, HistoryStore
 from worker import AnimateGenerationWorker, GenerationWorker, ImageGenerationWorker
 import attractor
 import prompt_client
+import server_manager as _sm
 
 
 # ── Tenstorrent dark palette as GTK CSS ───────────────────────────────────────
@@ -432,6 +433,52 @@ scrollbar slider:hover {
     background: rgba(244, 196, 113, 0.15);
 }
 
+/* -- Servers toolbar button + popover -------------------------------------- */
+.servers-menu-btn {
+    background: transparent;
+    border: 1px solid @tt_border;
+    border-radius: 4px;
+    color: @tt_text_secondary;
+    font-size: 10px;
+    padding: 2px 7px;
+    margin-left: 4px;
+}
+.servers-menu-btn:hover {
+    background: rgba(79, 209, 197, 0.12);
+    border-color: @tt_accent;
+    color: @tt_accent;
+}
+.servers-popover-row {
+    padding: 4px 2px;
+}
+.servers-popover-key {
+    font-size: 11px;
+    font-weight: bold;
+    color: @tt_accent;
+    min-width: 110px;
+}
+.servers-popover-label {
+    font-size: 10px;
+    color: @tt_text_muted;
+}
+.servers-popover-dot {
+    font-size: 9px;
+    margin-right: 4px;
+}
+.servers-popover-dot-on  { color: @tt_success; }
+.servers-popover-dot-off { color: @tt_text_muted; }
+.servers-popover-btn {
+    background: transparent;
+    border: 1px solid @tt_border;
+    border-radius: 3px;
+    color: @tt_text_secondary;
+    font-size: 10px;
+    padding: 1px 6px;
+    min-width: 42px;
+}
+.servers-popover-btn:hover { background: rgba(79,209,197,0.1); border-color: @tt_accent; }
+.servers-popover-btn-stop:hover { background: rgba(255,107,107,0.1); border-color: #FF6B6B; color: #FF6B6B; }
+
 /* -- Advanced accordion ---------------------------------------------------- */
 .adv-hdr-btn {
     background: @tt_bg_darkest;
@@ -528,6 +575,64 @@ scrollbar slider:hover {
     color: @tt_text_muted;
     border-color: @tt_border;
     background-color: @tt_bg_darkest;
+}
+
+/* -- Theme Set button ------------------------------------------------------- */
+.theme-btn {
+    background-color: @tt_bg_darkest;
+    color: @tt_pink;
+    border: 1px solid @tt_border;
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 11px;
+}
+.theme-btn:hover {
+    background-color: @tt_bg_dark;
+    border-color: @tt_pink;
+    color: @tt_text;
+}
+.theme-btn:disabled {
+    color: @tt_text_muted;
+    border-color: @tt_bg_dark;
+}
+.theme-btn-loading {
+    color: @tt_pink;
+    border: 1px solid @tt_pink;
+}
+
+/* -- Theme popover ---------------------------------------------------------- */
+.theme-popover {
+    background-color: @tt_bg_darkest;
+    border: 1px solid @tt_border;
+    border-radius: 6px;
+    padding: 8px;
+}
+.theme-shot-row {
+    background-color: @tt_bg_dark;
+    border-radius: 4px;
+    padding: 4px 6px;
+    margin-bottom: 2px;
+}
+.theme-shot-label {
+    color: @tt_accent;
+    font-size: 10px;
+    font-weight: bold;
+}
+.theme-shot-text {
+    color: @tt_text;
+    font-size: 11px;
+}
+.theme-queue-btn {
+    background-color: @tt_accent;
+    color: @tt_bg_darkest;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 12px;
+    font-size: 11px;
+    font-weight: bold;
+}
+.theme-queue-btn:hover {
+    background-color: @tt_accent_light;
 }
 
 /* -- Attractor launch button ---------------------------------------------- */
@@ -699,7 +804,7 @@ _SKIP_META_KEYS: frozenset = frozenset({
 
 # Maps (model_source, model_key) to (script_filename, display_label) for server launch.
 _SERVER_SCRIPTS: dict = {
-    ("video",   "wan2"):  ("start_wan.sh",     "Wan2.2 video"),
+    ("video",   "wan2"):  ("start_wan_qb2.sh", "Wan2.2 video (P300X2)"),
     ("video",   "mochi"): ("start_mochi.sh",   "Mochi-1 video"),
     ("image",   "flux"):  ("start_flux.sh",    "FLUX image"),
     ("animate", ""):      ("start_animate.sh", "Wan2.2-Animate"),
@@ -1830,6 +1935,7 @@ class ControlPanel(Gtk.Box):
         on_source_change,  # (model_source: str) -> None — called after the mode toggle switches
         on_start_prompt_gen = None,  # () -> None — launch start_prompt_gen.sh --gui
         on_inspire = None,           # (source: str, seed_text: str) -> None — start generation thread
+        on_theme_queue = None,       # (source: str) -> None — generate & popover a 5-shot theme set
     ):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self._on_generate = on_generate
@@ -1840,6 +1946,8 @@ class ControlPanel(Gtk.Box):
         self._on_source_change = on_source_change
         self._on_start_prompt_gen = on_start_prompt_gen or (lambda: None)
         self._on_inspire = on_inspire or (lambda s, t: None)
+        self._on_theme_queue = on_theme_queue or (lambda s: None)
+        self._theme_generating: bool = False  # True while theme generation is in progress
         # ── Prompt gen server state ───────────────────────────────────────────
         self._prompt_gen_ready: bool = False      # True when port 8001 health check passes
         self._prompt_gen_starting: bool = False   # True while start_prompt_gen.sh is running
@@ -1946,7 +2054,7 @@ class ControlPanel(Gtk.Box):
         self._mdl_wan2_btn.add_css_class("source-btn-left")
         self._mdl_wan2_btn.set_tooltip_text(
             "Wan2.2-T2V-A14B  ·  720p MP4  ·  ~3–10 min\n"
-            "Launches start_wan.sh"
+            "Launches start_wan_qb2.sh  (P300X2)"
         )
         self._mdl_mochi_btn = Gtk.ToggleButton(label="Mochi-1")
         self._mdl_mochi_btn.add_css_class("source-btn")
@@ -1989,6 +2097,19 @@ class ControlPanel(Gtk.Box):
         _tb_spacer = Gtk.Box()
         _tb_spacer.set_hexpand(True)
         self._toolbar_box.append(_tb_spacer)
+
+        # ── Servers menu button ───────────────────────────────────────────────
+        self._servers_btn = Gtk.MenuButton(label="Servers ▾")
+        self._servers_btn.add_css_class("servers-menu-btn")
+        self._servers_btn.set_tooltip_text(
+            "Start, stop, or restart managed services\n"
+            "(Wan2.2, Mochi, FLUX, Animate, Prompt Generator)"
+        )
+        self._servers_popover = self._build_servers_popover()
+        self._servers_btn.set_popover(self._servers_popover)
+        # Refresh status dots each time the popover opens.
+        self._servers_popover.connect("show", self._on_servers_popover_show)
+        self._toolbar_box.append(self._servers_btn)
 
         # _source_desc_lbl is kept for internal _update_source_desc() calls
         # but no longer shown in the panel — the status bar shows model info.
@@ -2053,6 +2174,18 @@ class ControlPanel(Gtk.Box):
         )
         self._inspire_btn.connect("clicked", self._on_inspire_clicked)
         inspire_row.append(self._inspire_btn)
+
+        # Theme Set button — generates a coherent 5-shot narrative via Qwen.
+        self._theme_btn = Gtk.Button(label="🎬 Theme Set")
+        self._theme_btn.add_css_class("theme-btn")
+        self._theme_btn.set_tooltip_text(
+            "Generate a cohesive 5-shot narrative using the local Qwen3-0.6B model.\n"
+            "Qwen acts as a director with a meta-goal (e.g. Hitchcock, Tarkovsky) and\n"
+            "produces 5 prompts that form an arc: establish → develop → climax → resolve.\n"
+            "A preview popover lets you review and queue all 5 shots at once."
+        )
+        self._theme_btn.connect("clicked", self._on_theme_clicked)
+        inspire_row.append(self._theme_btn)
 
         _inspire_spacer = Gtk.Box()
         _inspire_spacer.set_hexpand(True)
@@ -2383,7 +2516,7 @@ class ControlPanel(Gtk.Box):
         self._server_start_btn.add_css_class("server-start-btn")
         self._server_start_btn.set_tooltip_text(
             "Start the inference server using the local launch script.\n"
-            "Video → start_wan.sh  ·  Animate → start_animate.sh  ·  Image → start_flux.sh"
+            "Video → start_wan_qb2.sh  ·  Animate → start_animate.sh  ·  Image → start_flux.sh"
         )
         self._server_start_btn.set_sensitive(False)
         self._server_start_btn.connect("clicked", self._on_start_server_clicked)
@@ -2496,6 +2629,136 @@ class ControlPanel(Gtk.Box):
         """Toolbar strip (logo, source toggle, model selector) built in _build().
         MainWindow pins this at the top of the window above the paned layout."""
         return self._toolbar_box
+
+    # ── Servers popover ────────────────────────────────────────────────────────
+
+    def _build_servers_popover(self) -> Gtk.Popover:
+        """Build the Servers ▾ popover with one row per managed service."""
+        popover = Gtk.Popover()
+        popover.set_has_arrow(False)
+
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        outer.set_margin_top(8)
+        outer.set_margin_bottom(8)
+        outer.set_margin_start(10)
+        outer.set_margin_end(10)
+
+        # Header row with "Servers" label and a "↻ Refresh" button.
+        hdr = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        hdr_lbl = Gtk.Label(label="Managed Services")
+        hdr_lbl.add_css_class("servers-popover-key")
+        hdr_lbl.set_hexpand(True)
+        hdr_lbl.set_xalign(0)
+        hdr.append(hdr_lbl)
+        refresh_btn = Gtk.Button(label="↻")
+        refresh_btn.add_css_class("servers-popover-btn")
+        refresh_btn.set_tooltip_text("Refresh server status")
+        refresh_btn.connect("clicked", lambda _: self._refresh_servers_popover())
+        hdr.append(refresh_btn)
+        outer.append(hdr)
+
+        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        sep.set_margin_top(4)
+        sep.set_margin_bottom(4)
+        outer.append(sep)
+
+        # One row per server.  Store dot/label refs so refresh can update them.
+        self._servers_popover_dots: dict[str, Gtk.Label]  = {}
+        self._servers_popover_states: dict[str, Gtk.Label] = {}
+
+        for key, sdef in _sm.SERVERS.items():
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            row.add_css_class("servers-popover-row")
+
+            dot = Gtk.Label(label="○")
+            dot.add_css_class("servers-popover-dot")
+            dot.add_css_class("servers-popover-dot-off")
+            self._servers_popover_dots[key] = dot
+            row.append(dot)
+
+            text_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+            text_col.set_hexpand(True)
+            key_lbl = Gtk.Label(label=key)
+            key_lbl.add_css_class("servers-popover-key")
+            key_lbl.set_xalign(0)
+            text_col.append(key_lbl)
+            sub_lbl = Gtk.Label(label=sdef.label)
+            sub_lbl.add_css_class("servers-popover-label")
+            sub_lbl.set_xalign(0)
+            text_col.append(sub_lbl)
+            row.append(text_col)
+
+            # Start button
+            start_btn = Gtk.Button(label="▶ Start")
+            start_btn.add_css_class("servers-popover-btn")
+            start_btn.set_tooltip_text(f"Start {sdef.label}")
+            start_btn.connect(
+                "clicked",
+                lambda _b, k=key: self._on_servers_action(k, "start"),
+            )
+            row.append(start_btn)
+
+            # Stop button
+            stop_btn = Gtk.Button(label="■ Stop")
+            stop_btn.add_css_class("servers-popover-btn")
+            stop_btn.add_css_class("servers-popover-btn-stop")
+            stop_btn.set_tooltip_text(f"Stop {sdef.label}")
+            stop_btn.connect(
+                "clicked",
+                lambda _b, k=key: self._on_servers_action(k, "stop"),
+            )
+            row.append(stop_btn)
+
+            # Restart button
+            restart_btn = Gtk.Button(label="↺")
+            restart_btn.add_css_class("servers-popover-btn")
+            restart_btn.set_tooltip_text(f"Restart {sdef.label}")
+            restart_btn.connect(
+                "clicked",
+                lambda _b, k=key: self._on_servers_action(k, "restart"),
+            )
+            row.append(restart_btn)
+
+            outer.append(row)
+
+        popover.set_child(outer)
+        return popover
+
+    def _on_servers_popover_show(self, _popover) -> None:
+        """Kick off an async status refresh when the popover opens."""
+        threading.Thread(target=self._refresh_servers_popover, daemon=True).start()
+
+    def _refresh_servers_popover(self) -> None:
+        """Fetch health for all servers in a background thread, update dots on main thread."""
+        statuses = _sm.status_all(timeout=2.0)
+        GLib.idle_add(self._apply_servers_status, statuses)
+
+    def _apply_servers_status(self, statuses: dict[str, bool]) -> bool:
+        for key, dot in self._servers_popover_dots.items():
+            alive = statuses.get(key, False)
+            dot.set_label("●" if alive else "○")
+            dot.remove_css_class("servers-popover-dot-on")
+            dot.remove_css_class("servers-popover-dot-off")
+            dot.add_css_class("servers-popover-dot-on" if alive else "servers-popover-dot-off")
+        return GLib.SOURCE_REMOVE
+
+    def _on_servers_action(self, key: str, action: str) -> None:
+        """Run start/stop/restart in a background thread to avoid blocking the UI."""
+        def _worker():
+            try:
+                if action == "start":
+                    _sm.start(key, gui=True)
+                elif action == "stop":
+                    _sm.stop(key)
+                elif action == "restart":
+                    _sm.restart(key, gui=True)
+            except Exception:
+                pass
+            # Refresh dots after action completes.
+            statuses = _sm.status_all(timeout=2.0)
+            GLib.idle_add(self._apply_servers_status, statuses)
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     # ── State ──────────────────────────────────────────────────────────────────
 
@@ -2657,7 +2920,7 @@ class ControlPanel(Gtk.Box):
                 )
                 self._server_start_btn.set_tooltip_text(
                     "Start the inference server using the local launch script.\n"
-                    "Video (Wan2.2) → start_wan.sh  ·  Image → start_flux.sh"
+                    "Video (Wan2.2) → start_wan_qb2.sh  ·  Image → start_flux.sh"
                 )
         elif self._model_source == "image":
             self._image_model = model
@@ -3167,6 +3430,153 @@ class ControlPanel(Gtk.Box):
         self._inspire_btn.add_css_class("inspire-btn")
         self._inspire_btn.set_sensitive(True)
 
+    # ── Theme Set handlers ─────────────────────────────────────────────────────
+
+    def _on_theme_clicked(self, _btn) -> None:
+        """Handle Theme Set button click — start background theme generation."""
+        if self._theme_generating:
+            return
+        self._theme_generating = True
+        self._theme_btn.set_label("⏳ Thinking…")
+        self._theme_btn.remove_css_class("theme-btn")
+        self._theme_btn.add_css_class("theme-btn-loading")
+        self._theme_btn.set_sensitive(False)
+        self._on_theme_queue(self._model_source)
+
+    def set_theme_result(self, result: dict, on_queue_shots) -> None:
+        """Called on main thread when theme generation succeeds.
+
+        Opens a popover anchored to the Theme Set button that shows the 5 shots
+        with their role labels and polished prompts, plus a "Queue All 5" button.
+
+        Args:
+            result:        dict from generate_theme.generate_theme()
+            on_queue_shots: callable(shots: list[dict]) — called when user confirms
+        """
+        self._theme_generating = False
+        self._theme_btn.set_label("🎬 Theme Set")
+        self._theme_btn.remove_css_class("theme-btn-loading")
+        self._theme_btn.add_css_class("theme-btn")
+        self._theme_btn.set_sensitive(True)
+
+        shots = result.get("shots", [])
+        theme_label = result.get("theme", "Theme Set")
+        source_tag = result.get("source", "")
+
+        # Build popover content
+        popover = Gtk.Popover()
+        popover.set_parent(self._theme_btn)
+        popover.add_css_class("theme-popover")
+
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        outer.set_size_request(480, -1)
+
+        # Header: theme name + source
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        header_lbl = Gtk.Label(label=f"<b>{theme_label}</b>")
+        header_lbl.set_use_markup(True)
+        header_lbl.set_halign(Gtk.Align.START)
+        header_lbl.set_hexpand(True)
+        src_lbl = Gtk.Label(label=source_tag)
+        src_lbl.add_css_class("inspire-dot")
+        header.append(header_lbl)
+        header.append(src_lbl)
+        outer.append(header)
+
+        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        outer.append(sep)
+
+        # Shot rows
+        role_labels = {
+            "establish": "1 · Establish",
+            "develop":   "2/3 · Develop",
+            "climax":    "4 · Climax",
+            "resolve":   "5 · Resolve",
+        }
+        for shot in shots:
+            shot_num = shot.get("shot", "?")
+            role = shot.get("role", "")
+            prompt_text = shot.get("prompt", shot.get("slug", ""))
+
+            row = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            row.add_css_class("theme-shot-row")
+
+            role_str = f"Shot {shot_num} · {role.capitalize()}"
+            role_lbl = Gtk.Label(label=role_str)
+            role_lbl.add_css_class("theme-shot-label")
+            role_lbl.set_halign(Gtk.Align.START)
+            row.append(role_lbl)
+
+            prompt_lbl = Gtk.Label(label=prompt_text)
+            prompt_lbl.add_css_class("theme-shot-text")
+            prompt_lbl.set_wrap(True)
+            prompt_lbl.set_wrap_mode(Pango.WrapMode.WORD_CHAR)
+            prompt_lbl.set_halign(Gtk.Align.START)
+            prompt_lbl.set_xalign(0.0)
+            row.append(prompt_lbl)
+
+            outer.append(row)
+
+        sep2 = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        outer.append(sep2)
+
+        # Footer: Queue All 5 + Dismiss
+        footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        footer.set_halign(Gtk.Align.END)
+
+        dismiss_btn = Gtk.Button(label="Dismiss")
+        dismiss_btn.add_css_class("inspire-confirm-btn")
+        dismiss_btn.connect("clicked", lambda _b: popover.popdown())
+        footer.append(dismiss_btn)
+
+        queue_btn = Gtk.Button(label="▶ Queue All 5")
+        queue_btn.add_css_class("theme-queue-btn")
+
+        def _queue_all(_b):
+            popover.popdown()
+            on_queue_shots(shots)
+
+        queue_btn.connect("clicked", _queue_all)
+        footer.append(queue_btn)
+
+        outer.append(footer)
+
+        popover.set_child(outer)
+        popover.popup()
+
+    def set_theme_error(self, msg: str) -> None:
+        """Called on main thread when theme generation fails — restore button."""
+        self._theme_generating = False
+        self._theme_btn.set_label("🎬 Theme Set")
+        self._theme_btn.remove_css_class("theme-btn-loading")
+        self._theme_btn.add_css_class("theme-btn")
+        self._theme_btn.set_sensitive(True)
+
+    def get_generation_defaults(self) -> dict:
+        """Return current panel settings as a dict, minus the prompt text.
+
+        Used by MainWindow._on_theme_queue_shots() to build enqueue args for
+        each of the 5 theme shots without disturbing the prompt buffer.
+        """
+        if self._model_source == "video":
+            current_model_id = self._video_model
+        elif self._model_source == "image":
+            current_model_id = self._image_model
+        else:
+            current_model_id = ""
+        return {
+            "neg":            self._get_neg(),
+            "steps":          int(self._steps_spin.get_value()),
+            "seed":           int(self._seed_spin.get_value()),
+            "seed_image_path": self._seed_image_path,
+            "model_source":   self._model_source,
+            "guidance_scale": float(self._guidance_spin.get_value()),
+            "ref_video_path": self._ref_video_path,
+            "ref_char_path":  self._ref_char_path,
+            "animate_mode":   self._animate_mode,
+            "model_id":       current_model_id,
+        }
+
     # ── Button handlers ────────────────────────────────────────────────────────
 
     def _on_action_clicked(self, _btn) -> None:
@@ -3496,13 +3906,24 @@ class _StatusBar(Gtk.Box):
     def _poll_loop(self) -> None:
         """Background thread: refresh disk + chip telemetry every 10 s.
 
-        An initial chip read is done immediately (no leading wait) so the
-        segment is populated as soon as the window appears rather than 10 s
-        after startup.
+        Two-stage initial read:
+          1. Post sysfs-only clock data immediately (zero-wait, passive read)
+             so the chip segment is visible as soon as the window appears.
+          2. Run the full _read_chip_telemetry() which resolves tt-smi and
+             fetches ASIC temperature + power (may block up to 13 s on first
+             call due to version check + snapshot).  Posts the enriched result.
         """
-        # Initial read — no wait so the chip segment populates right away.
+        # Stage 1: instant sysfs seed so the segment is never blank at startup.
+        clocks = self._read_sysfs_clocks()
+        if clocks:
+            max_clk = max(clocks)
+            shade_str = "".join(self._clock_to_shade(c, max_clk) for c in clocks)
+            GLib.idle_add(self._apply_chip, f"{max_clk} MHz  {shade_str}")
+
+        # Stage 2: full read with tt-smi (blocks up to ~13 s on cold start).
         chip_text = self._read_chip_telemetry()
         GLib.idle_add(self._apply_chip, chip_text)
+
         while not self._stop.wait(10.0):
             GLib.idle_add(self._refresh_disk)
             chip_text = self._read_chip_telemetry()
@@ -3982,6 +4403,7 @@ class MainWindow(Gtk.ApplicationWindow):
             on_source_change=self._on_source_change,
             on_start_prompt_gen=self._on_start_prompt_gen,
             on_inspire=self._on_inspire,
+            on_theme_queue=self._on_theme,
         )
 
         # ── Main toolbar ──────────────────────────────────────────────────────
@@ -4436,9 +4858,12 @@ class MainWindow(Gtk.ApplicationWindow):
         a single slow response (e.g. TT chip saturated during active inference)
         doesn't flip the UI dot to red.  A successful ping resets the counter
         immediately.
+
+        Posts to the main thread on every poll (not just state changes) so that
+        transient exceptions in the idle callback never leave the UI stuck in a
+        stale state indefinitely.
         """
         consecutive_failures = 0
-        last_reported_ready: "bool | None" = None
 
         while not self._health_stop.is_set():
             ready = self._client.health_check()
@@ -4454,49 +4879,47 @@ class MainWindow(Gtk.ApplicationWindow):
                     self._health_stop.wait(10.0)
                     continue
 
-            # Only post a result when the state has changed or we just came up.
-            # This avoids redundant idle_add calls every 10 s while steady.
-            if ready != last_reported_ready:
-                last_reported_ready = ready
-                GLib.idle_add(self._on_health_result, ready, running_model)
-            elif ready and running_model is not None:
-                # Model may have changed (e.g. server restarted with different model).
-                GLib.idle_add(self._on_health_result, ready, running_model)
-
+            # Always post so the UI can't get stuck in a stale state.
+            GLib.idle_add(self._on_health_result, ready, running_model)
             self._health_stop.wait(10.0)
 
     def _on_health_result(self, ready: bool, running_model: "str | None") -> bool:
         """Runs on main thread (called by GLib.idle_add)."""
-        if not self._alive:
-            return False
-        # Auto-switch source tab on first model detection — once only.
-        if running_model and not self._auto_tab_switched:
-            source = _MODEL_TO_SOURCE.get(running_model)
-            if source and source != self._controls.get_model_source():
-                self._controls.switch_to_source(source)
-            self._auto_tab_switched = True
+        try:
+            if not self._alive:
+                return False
+            # Auto-switch source tab on first model detection — once only.
+            if running_model and not self._auto_tab_switched:
+                source = _MODEL_TO_SOURCE.get(running_model)
+                if source and source != self._controls.get_model_source():
+                    self._controls.switch_to_source(source)
+                self._auto_tab_switched = True
 
-        self._controls.set_server_state(ready, running_model)
+            self._controls.set_server_state(ready, running_model)
 
-        # Enable Recover Jobs (File menu) whenever the server is reachable,
-        # regardless of which model tab is active or whether a job is running.
-        server_reachable = ready or (running_model is not None)
-        recover_action = self.lookup_action("recover-jobs")
-        if recover_action:
-            recover_action.set_enabled(server_reachable and not self._server_launching)
+            # Enable Recover Jobs (File menu) whenever the server is reachable,
+            # regardless of which model tab is active or whether a job is running.
+            server_reachable = ready or (running_model is not None)
+            recover_action = self.lookup_action("recover-jobs")
+            if recover_action:
+                recover_action.set_enabled(server_reachable and not self._controls._server_launching)
 
-        # Mirror server health in the hardware status bar.
-        display_model = _MODEL_DISPLAY.get(running_model or "", running_model or "")
-        self._hw_statusbar.update_server(ready, display_model or None)
+            # Mirror server health in the hardware status bar.
+            display_model = _MODEL_DISPLAY.get(running_model or "", running_model or "")
+            self._hw_statusbar.update_server(ready, display_model or None)
 
-        if ready:
-            # Stop tailing the Docker log — server is confirmed up
-            if self._log_tail_stop:
-                self._log_tail_stop.set()
-                self._log_tail_stop = None
-            if not (self._worker_gen and self._worker_gen._running()):
-                self._set_status("Server ready — enter a prompt and click Generate")
-        return False  # don't repeat (one-shot idle callback)
+            if ready:
+                # Stop tailing the Docker log — server is confirmed up
+                if self._log_tail_stop:
+                    self._log_tail_stop.set()
+                    self._log_tail_stop = None
+                if not (self._worker_gen and self._worker_gen._running()):
+                    self._set_status("Server ready — enter a prompt and click Generate")
+        except Exception as exc:
+            import traceback
+            print(f"[health] _on_health_result error: {exc}", flush=True)
+            traceback.print_exc()
+        return False  # one-shot idle callback
 
     def _load_prompt_gen_system(self) -> str:
         """
@@ -4544,7 +4967,7 @@ class MainWindow(Gtk.ApplicationWindow):
         detect when the server is ready.  Users can watch /tmp/tt_prompt_gen.log
         for details.
         """
-        script = Path(__file__).parent / "start_prompt_gen.sh"
+        script = Path(__file__).parent.parent / "bin" / "start_prompt_gen.sh"
         subprocess.Popen(
             [str(script), "--gui"],
             stdout=subprocess.DEVNULL,
@@ -4580,6 +5003,71 @@ class MainWindow(Gtk.ApplicationWindow):
         print(f"[tt-gen] Prompt generation error: {msg}", file=sys.stderr)
         self._controls.set_inspire_error(msg)
         return False
+
+    # ── Theme Set ──────────────────────────────────────────────────────────────
+
+    def _on_theme(self, source: str) -> None:
+        """Start a thematic 5-shot generation job in a background thread.
+
+        Called by ControlPanel._on_theme_clicked() via the on_theme_queue callback.
+        Posts the result back to the main thread via idle_add.
+        """
+        def run():
+            try:
+                import generate_theme
+                result = generate_theme.generate_theme(enhance=True)
+                GLib.idle_add(self._on_theme_result, result)
+            except Exception as e:  # noqa: BLE001
+                import traceback
+                traceback.print_exc()
+                GLib.idle_add(self._on_theme_error, str(e))
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _on_theme_result(self, result: dict) -> bool:
+        """Runs on main thread — open the theme preview popover."""
+        self._controls.set_theme_result(result, self._on_theme_queue_shots)
+        return False
+
+    def _on_theme_error(self, msg: str) -> bool:
+        """Runs on main thread — log error and restore the theme button."""
+        print(f"[tt-gen] Theme generation error: {msg}", file=sys.stderr)
+        self._controls.set_theme_error(msg)
+        return False
+
+    def _on_theme_queue_shots(self, shots: list) -> None:
+        """Called on main thread when user clicks 'Queue All 5' in the theme popover.
+
+        Enqueues all 5 shots using the current ControlPanel settings (steps,
+        guidance, model source, etc.) but swapping in each shot's polished prompt.
+        If nothing is currently generating, starts the queue immediately.
+        """
+        if not shots:
+            return
+
+        defaults = self._controls.get_generation_defaults()
+
+        for shot in shots:
+            prompt = shot.get("prompt", shot.get("slug", ""))
+            if not prompt:
+                continue
+            self._on_enqueue(
+                prompt,
+                defaults["neg"],
+                defaults["steps"],
+                defaults["seed"],
+                defaults["seed_image_path"],
+                defaults["model_source"],
+                defaults["guidance_scale"],
+                defaults["ref_video_path"],
+                defaults["ref_char_path"],
+                defaults["animate_mode"],
+                defaults["model_id"],
+            )
+
+        # Start the queue if nothing is currently generating
+        if not (self._worker and self._worker.is_alive()):
+            self._start_next_queued()
 
     # ── Attractor Mode ─────────────────────────────────────────────────────────
 
@@ -4809,7 +5297,7 @@ class MainWindow(Gtk.ApplicationWindow):
         script_name, label = _SERVER_SCRIPTS.get(
             (model_source, model_key), ("start_wan.sh", "Wan2.2 video")
         )
-        script_path = str(Path(__file__).parent / script_name)
+        script_path = str(Path(__file__).parent.parent / "bin" / script_name)
 
         self._controls.set_server_launching(True, clear_log=True)
         self._controls.append_server_log(f"Starting {label} server ({script_name} --gui)…")
@@ -4907,7 +5395,7 @@ class MainWindow(Gtk.ApplicationWindow):
             self._log_tail_stop.set()
             self._log_tail_stop = None
         # Both video and image use the same Docker image, so either script can stop it.
-        script_path = str(Path(__file__).parent / "start_wan.sh")
+        script_path = str(Path(__file__).parent.parent / "bin" / "start_wan_qb2.sh")
 
         self._controls.set_server_launching(True, clear_log=True)
         self._controls.append_server_log("Stopping inference server…")

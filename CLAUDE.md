@@ -3,7 +3,8 @@
 ## Running the app
 
 ```bash
-/usr/bin/python3 main.py [--server http://localhost:8000]
+./tt-gen                                            # recommended launcher
+/usr/bin/python3 app/main.py [--server http://localhost:8000]  # direct
 ```
 
 Use the **system** python3 (`/usr/bin/python3`), not a venv. GTK4 bindings
@@ -15,28 +16,36 @@ sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0  # if missing
 
 ## Starting / stopping the inference server
 
-From the GUI, use the **▶ Start** and **■ Stop** buttons in the server control
-row (below the Generation Source toggle). Start is context-aware: within Video tab, Wan2.2 runs `start_wan.sh` and Mochi-1 runs `start_mochi.sh`; Animate tab runs `start_animate.sh`; Image tab runs `start_flux.sh`. Script output streams into a collapsible log panel; the panel
-closes automatically when the health check confirms the server is ready.
+From the GUI, use the **Servers ▾** toolbar dropdown or the **▶ Start** / **■ Stop**
+buttons in the server control row. Start is context-aware: Video tab starts
+`start_wan_qb2.sh` (QB2/P300x2) or `start_mochi.sh`; Animate tab starts
+`start_animate.sh`; Image tab starts `start_flux.sh`. Script output streams into
+a collapsible log panel that closes when the health check confirms the server is ready.
 
-From the terminal:
+From the terminal (all scripts are in `bin/`):
 
 ```bash
 cd ~/code/tt-local-generator
-./start_wan.sh            # start Wan2.2-T2V server, tail its log
-./start_wan.sh --stop     # stop the running server container
-./start_mochi.sh          # start Mochi-1 server, tail its log
-./start_mochi.sh --stop   # stop the running server container
-./start_animate.sh        # start Wan2.2-Animate-14B server, tail its log
-./start_animate.sh --stop # stop the running server container
-./start_flux.sh           # start FLUX server, tail its log
-./start_flux.sh --stop    # stop the running server container
+./bin/start_wan_qb2.sh         # Wan2.2-T2V on QB2 (P300x2) — default
+./bin/start_wan_qb2.sh --stop  # stop the running server container
+./bin/start_wan.sh             # Wan2.2-T2V on P150x4
+./bin/start_mochi.sh           # Mochi-1 on QB2
+./bin/start_animate.sh         # Wan2.2-Animate-14B (CPU/CUDA Phase 1)
+./bin/start_flux.sh            # FLUX.1-dev image server
+./bin/start_prompt_gen.sh      # Qwen3-0.6B prompt server (CPU, port 8001)
 ```
 
-All scripts accept `--gui` (used internally by the GUI) to skip interactive
-prompts and the final `tail -f`, so the subprocess exits cleanly once Docker is
-up. The server is ready when the log prints `Application startup complete`
-(~5 min on P150x4 for Wan2.2).
+Or via the CLI:
+
+```bash
+./tt-ctl start wan2.2          # non-blocking; same as start_wan_qb2.sh --gui
+./tt-ctl stop  wan2.2
+./tt-ctl start all             # wan2.2 + prompt-server
+./tt-ctl servers               # live health of every managed service
+```
+
+All scripts accept `--gui` (non-blocking, skips the interactive tail).
+The server is ready when the log prints `Application startup complete`.
 
 ### Animate mode (Wan2.2-Animate-14B)
 
@@ -53,18 +62,55 @@ modified `tt-media-server` files from `~/code/tt-inference-server/tt-media-serve
 into the container and upgrades `diffusers>=0.34.0` before starting uvicorn
 (Phase 1: Diffusers CPU/CUDA path — TT hardware support pending).
 
+## Directory layout
+
+All Python source lives in `app/`, shell scripts in `bin/`.
+
+```
+tt-local-generator/
+  app/                   ← Python source
+  bin/                   ← shell scripts (start_*.sh, apply_patches.sh)
+  patches/               ← hotpatch files applied by bin/apply_patches.sh
+  vendor/                ← shallow clone of tt-inference-server (gitignored)
+  docker/                ← Docker image archive (Git LFS, ~7.4 GB)
+  tests/                 ← pytest test suite (83 tests)
+  tt-gen                 ← GUI launcher
+  tt-ctl                 ← CLI (status, history, start/stop services)
+```
+
 ## Architecture
 
 | File | Purpose |
 |---|---|
-| `main.py` | `Gtk.Application` entry point |
-| `main_window.py` | All GTK4 widgets and `MainWindow` |
-| `worker.py` | `GenerationWorker` — pure Python, no GUI imports |
-| `api_client.py` | HTTP client for the inference server |
-| `history_store.py` | Persistent JSON history + file path management |
+| `app/main.py` | `Gtk.Application` entry point |
+| `app/main_window.py` | All GTK4 widgets and `MainWindow` |
+| `app/worker.py` | `GenerationWorker` — pure Python, no GUI imports |
+| `app/api_client.py` | HTTP client for the inference server |
+| `app/server_manager.py` | Start/stop/health for all managed services (no GTK) |
+| `app/history_store.py` | Persistent JSON history + file path management |
 
-`worker.py`, `api_client.py`, and `history_store.py` have **zero GUI
-dependencies** — keep them that way.
+`worker.py`, `api_client.py`, `server_manager.py`, and `history_store.py` have
+**zero GUI dependencies** — keep them that way.
+
+## Server management (`server_manager.py`)
+
+`app/server_manager.py` is the single source of truth for all managed services.
+It is imported by both `tt-ctl` and `main_window.py`. Add new services there by
+adding a `ServerDef` to `SERVERS`. Current services: `wan2.2`, `mochi`, `flux`,
+`animate`, `prompt-server`. The key `"all"` starts the recommended set
+(`wan2.2` + `prompt-server`).
+
+```python
+from server_manager import start, stop, restart, health, status_all, SERVERS
+
+start("wan2.2")           # launch Wan2.2 server (non-blocking --gui mode)
+stop("prompt-server")     # send --stop to the prompt-gen script
+health("wan2.2")          # {"wan2.2": True/False}
+status_all()              # {"wan2.2": True, "prompt-server": False, ...}
+```
+
+Path resolution: `_REPO_ROOT = Path(__file__).resolve().parent.parent` (app/ → repo root).
+All script paths are `_BIN / sdef.script` where `_BIN = _REPO_ROOT / "bin"`.
 
 ## GTK threading discipline (CRITICAL)
 
@@ -150,15 +196,15 @@ button clicks or `_on_finished`).
 
 ## Assets
 
-`assets/` contains:
+`app/assets/` contains:
 - `tenstorrent.png` — 32×32 app icon (pulled from tenstorrent.com/favicon.ico)
 - `ai.tenstorrent.tt-video-gen.desktop` — XDG desktop entry for GNOME/KDE launchers
 
 `setup_ubuntu.sh` copies both into the correct XDG locations automatically.
 To install manually:
 ```bash
-cp assets/tenstorrent.png ~/.local/share/icons/hicolor/32x32/apps/ai.tenstorrent.tt-video-gen.png
-cp assets/ai.tenstorrent.tt-video-gen.desktop ~/.local/share/applications/
+cp app/assets/tenstorrent.png ~/.local/share/icons/hicolor/32x32/apps/ai.tenstorrent.tt-video-gen.png
+cp app/assets/ai.tenstorrent.tt-video-gen.desktop ~/.local/share/applications/
 update-desktop-database ~/.local/share/applications
 ```
 
@@ -194,9 +240,34 @@ If the app crashes with a traceback pointing to a line number that doesn't
 match the source, the bytecode cache is stale (e.g. from an earlier version).
 Clear it with:
 ```bash
-find ~/code/tt-local-generator -name "*.pyc" -delete
-find ~/code/tt-local-generator -name "__pycache__" -type d -exec rm -rf {} +
+find ~/code/tt-local-generator/app -name "*.pyc" -delete
+find ~/code/tt-local-generator/app -name "__pycache__" -type d -exec rm -rf {} +
 ```
+
+## Running tests
+
+```bash
+/usr/bin/python3 -m pytest tests/ -q   # 83 tests, all should pass
+```
+
+Tests are in `tests/` at repo root. Each file does `sys.path.insert(0, str(Path(__file__).parent.parent / "app"))` to import from `app/`. Tests mock all subprocess and network calls.
+
+## Vendored `tt-inference-server`
+
+`vendor/tt-inference-server/` is a shallow git clone of the upstream repo (gitignored due to 143 GB working tree). The pinned commit SHA is in `vendor/VENDOR_SHA`.
+
+```bash
+cat vendor/VENDOR_SHA            # see what's pinned
+./bin/apply_patches.sh           # apply patches/ to vendor/
+```
+
+The `.env` file at `vendor/tt-inference-server/.env` is passed to Docker containers via `--env-file`. Key variables:
+- `TT_DIT_CACHE_DIR` — caches compiled TT weights across container restarts (~66 GB after first run)
+- `HF_HUB_OFFLINE=1` + `TRANSFORMERS_OFFLINE=1` — prevents HF network access during startup (weights are bind-mounted from host cache)
+
+The `patches/` directory contains:
+- `patches/media_server_config/config/constants.py` — overrides P300X2 device config, request timeouts
+- `patches/tt_dit/` — pipeline fixes (bind-mounted only in dev_mode)
 
 ## Prompt generator
 
@@ -208,13 +279,13 @@ available.
 
 | File | Purpose |
 |---|---|
-| `generate_prompt.py` | CLI generator — algo → Markov → LLM polish |
-| `word_banks.py` | All word banks as Python lists + sampling helpers |
-| `prompt_server.py` | FastAPI server exposing Qwen3-0.6B on port 8001 |
-| `start_prompt_gen.sh` | Start/stop the prompt server |
-| `prompts/prompt_generator.md` | System prompt for interactive LLM use |
-| `prompts/markov_seed.txt` | Seed corpus for the Markov chain (tagged by type) |
-| `prompts/markov_output.txt` | Accumulate good outputs here to grow the corpus |
+| `app/generate_prompt.py` | CLI generator — algo → Markov → LLM polish |
+| `app/word_banks.py` | All word banks as Python lists + sampling helpers |
+| `app/prompt_server.py` | FastAPI server exposing Qwen3-0.6B on port 8001 |
+| `bin/start_prompt_gen.sh` | Start/stop the prompt server |
+| `app/prompts/prompt_generator.md` | System prompt for interactive LLM use |
+| `app/prompts/markov_seed.txt` | Seed corpus for the Markov chain (tagged by type) |
+| `app/prompts/markov_output.txt` | Accumulate good outputs here to grow the corpus |
 
 ### Three-tier design
 
@@ -238,21 +309,21 @@ elements. Falls back gracefully (returns the raw slug) if the server is down.
 
 ```bash
 # Default: algo + LLM polish, video type
-python3 generate_prompt.py
+python3 app/generate_prompt.py
 
 # Markov mode, image type
-python3 generate_prompt.py --type image --mode markov
+python3 app/generate_prompt.py --type image --mode markov
 
 # Algo only, no LLM, five prompts
-python3 generate_prompt.py --count 5 --no-enhance
+python3 app/generate_prompt.py --count 5 --no-enhance
 
 # Plain text output (no JSON wrapper)
-python3 generate_prompt.py --raw
+python3 app/generate_prompt.py --raw
 
 # All types
-python3 generate_prompt.py --type video    # for Wan2.2 / Mochi
-python3 generate_prompt.py --type image    # for FLUX / SD
-python3 generate_prompt.py --type animate  # for Wan2.2-Animate
+python3 app/generate_prompt.py --type video    # for Wan2.2 / Mochi
+python3 app/generate_prompt.py --type image    # for FLUX / SD
+python3 app/generate_prompt.py --type animate  # for Wan2.2-Animate
 ```
 
 ### JSON output schema
@@ -269,9 +340,10 @@ python3 generate_prompt.py --type animate  # for Wan2.2-Animate
 ### Starting the prompt server
 
 ```bash
-./start_prompt_gen.sh          # start in background, wait for ready
-./start_prompt_gen.sh --stop   # stop
-./start_prompt_gen.sh --gui    # start silently (no tail, for GUI use)
+./bin/start_prompt_gen.sh          # start in background, wait for ready
+./bin/start_prompt_gen.sh --stop   # stop
+./bin/start_prompt_gen.sh --gui    # start silently (no tail, for GUI use)
+# Or: ./tt-ctl start prompt-server
 ```
 
 The server loads Qwen3-0.6B on CPU (~2.9 GB RSS, ~19 tok/s on Ryzen 7 9700X).
@@ -294,7 +366,7 @@ def generate_prompt(prompt_type="video", mode="markov"):
     result = subprocess.run(
         [
             "python3",
-            "/home/ttuser/code/tt-local-generator/generate_prompt.py",
+            "/home/ttuser/code/tt-local-generator/app/generate_prompt.py",
             "--type", prompt_type,
             "--mode", mode,
         ],

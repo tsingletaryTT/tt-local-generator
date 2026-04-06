@@ -1,29 +1,25 @@
 #!/usr/bin/env bash
-# start_wan.sh — Start the Wan2.2-T2V-A14B-Diffusers inference server on P150x4.
+# start_flux.sh — Start the FLUX.1-dev image generation server on 4× p300c (p300x2).
 #
-# Uses the known-working configuration:
-#   - Docker image: ghcr.io/tenstorrent/tt-media-inference-server:0.11.1-bac8b34
-#   - Non-dev mode (dev mode breaks device init on this image)
-#   - --host-hf-cache mounts the local HuggingFace cache so the 118 GB weights
-#     are found immediately inside the container (avoids the 1200s download timeout)
+# Hardware note:
+#   4× Wormhole p300c PCIe cards = 2 logical p300 boards (L/R dies) = DeviceTypes.P300X2
+#   This is distinct from the p150x4 (BH QuietBox) — use --tt-device p300x2.
 #
-# The workflow process writes a log file to:
-#   tt-inference-server/workflow_logs/docker_server/media_<timestamp>_Wan2.2-T2V-A14B-Diffusers_p150x4_server.log
-# This script waits for that file to appear then tails it live.
+# The Docker image and model are the same tt-media-server used for video,
+# but the API is synchronous: POST /v1/images/generations returns a base64 JPEG.
 #
 # Usage:
-#   ./start_wan.sh            # start server and tail its log
-#   ./start_wan.sh --stop     # stop the running server container
-#   ./start_wan.sh --gui      # start without interactive prompts or tail (for GUI use)
-#   ./start_wan.sh --help     # show this help
+#   ./start_flux.sh             # start server and tail its log
+#   ./start_flux.sh --schnell   # use FLUX.1-schnell (faster, lower quality)
+#   ./start_flux.sh --stop      # stop the running server container
+#   ./start_flux.sh --gui       # start without interactive prompts or tail (for GUI use)
+#   ./start_flux.sh --help      # show this help
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
-# Prefer vendored tt-inference-server if present (portable / self-contained).
-# Fall back to the developer checkout in ~/code/.
 if [[ -d "$REPO_ROOT/vendor/tt-inference-server" ]]; then
     REPO_DIR="$REPO_ROOT/vendor/tt-inference-server"
 else
@@ -31,8 +27,8 @@ else
 fi
 HF_CACHE="$HOME/.cache/huggingface"
 DOCKER_IMAGE="ghcr.io/tenstorrent/tt-media-inference-server:0.11.1-bac8b34"
+MODEL="FLUX.1-dev"
 LOG_DIR="$REPO_DIR/workflow_logs/docker_server"
-LOG_GLOB="media_*_Wan2.2-T2V-A14B-Diffusers_p150x4_server.log"
 
 # ── Parse flags ───────────────────────────────────────────────────────────────
 
@@ -40,7 +36,7 @@ GUI_MODE=0
 for arg in "$@"; do
     case "$arg" in
         --help|-h)
-            sed -n '2,19p' "$0" | sed 's/^# \?//'
+            sed -n '2,16p' "$0" | sed 's/^# \?//'
             exit 0
             ;;
         --stop)
@@ -55,6 +51,10 @@ for arg in "$@"; do
             echo "Server stopped."
             exit 0
             ;;
+        --schnell)
+            MODEL="FLUX.1-schnell"
+            echo "Using FLUX.1-schnell (fewer steps needed, lower quality)."
+            ;;
         --gui)
             # GUI mode: skip interactive prompts and the final tail -f.
             # The caller (GUI app) monitors readiness via the /tt-liveness health check.
@@ -63,6 +63,8 @@ for arg in "$@"; do
     esac
 done
 
+LOG_GLOB="media_*_${MODEL}_p300x2_server.log"
+
 # ── Sanity checks ─────────────────────────────────────────────────────────────
 
 if [[ ! -d "$REPO_DIR" ]]; then
@@ -70,14 +72,20 @@ if [[ ! -d "$REPO_DIR" ]]; then
     exit 1
 fi
 
-if [[ ! -d "$HF_CACHE/hub/models--Wan-AI--Wan2.2-T2V-A14B-Diffusers" ]]; then
-    echo "WARNING: HuggingFace cache not found at $HF_CACHE"
-    echo "         The model weights will be downloaded inside the container (~118 GB)."
-    echo "         This will likely exceed the container's 1200s startup timeout."
+# Check if FLUX weights are cached.
+# HuggingFace CLI stores repos as models--{org}--{name}, preserving dots in the name.
+# e.g. black-forest-labs/FLUX.1-dev → models--black-forest-labs--FLUX.1-dev
+HF_REPO="black-forest-labs/${MODEL}"
+HF_CACHE_DIR="$HF_CACHE/hub/models--black-forest-labs--${MODEL}"
+if [[ ! -d "$HF_CACHE_DIR" ]]; then
+    echo "WARNING: FLUX weights not found at $HF_CACHE_DIR"
+    echo "         Pre-download with:"
+    echo "           huggingface-cli download ${HF_REPO}"
+    echo "         (~20 GB for FLUX.1-dev, ~7 GB for FLUX.1-schnell)"
     if [[ $GUI_MODE -eq 1 ]]; then
         echo "         Continuing in GUI mode (weights will download inside container)."
     else
-        read -rp "Continue anyway? [y/N] " yn
+        read -rp "Continue anyway (weights will download inside container)? [y/N] " yn
         [[ "${yn,,}" == "y" ]] || exit 1
     fi
 fi
@@ -89,12 +97,10 @@ if [[ -n "$EXISTING" ]]; then
     echo "Server already running in container $EXISTING"
     echo ""
     if [[ $GUI_MODE -eq 1 ]]; then
-        # In GUI mode just report and exit; health check will confirm readiness.
         echo "Server is already up. Use the GUI health indicator to confirm readiness."
         exit 0
     fi
-    # Find the most recent log for this container and tail it
-    LATEST_LOG=$(ls -t "$LOG_DIR"/$LOG_GLOB 2>/dev/null | head -1)
+    LATEST_LOG=$(ls -t "$LOG_DIR"/$LOG_GLOB 2>/dev/null | head -1 || true)
     if [[ -n "$LATEST_LOG" ]]; then
         echo "Tailing log: $LATEST_LOG"
         echo "(Ctrl-C to stop tailing — server keeps running)"
@@ -107,34 +113,29 @@ if [[ -n "$EXISTING" ]]; then
     exit 0
 fi
 
-# ── Launch workflow process in background ─────────────────────────────────────
+# ── Launch ────────────────────────────────────────────────────────────────────
 
-echo "Starting Wan2.2-T2V-A14B-Diffusers on P150x4…"
+echo "Starting ${MODEL} on 4× p300c (p300x2)…"
 echo "  Image:     $DOCKER_IMAGE"
 echo "  HF cache:  $HF_CACHE  (bind-mounted read-only)"
 echo "  Port:      8000"
+echo "  API:       POST /v1/images/generations  (synchronous — returns base64 JPEG)"
 echo ""
 
 mkdir -p "$LOG_DIR"
-
-# Record the timestamp so we pick the log file created by *this* run, not an old one
 START_TS=$(date +%s)
 
-cd "$REPO_DIR"
-
-# Read JWT_SECRET from .env so setup_host doesn't prompt for it.
-# MODEL_SOURCE=huggingface skips the interactive "How do you want to provide a model?" prompt.
 JWT_SECRET=$(grep -E '^JWT_SECRET=' "$REPO_DIR/.env" 2>/dev/null | cut -d= -f2- | tr -d '"'"'" || true)
 if [[ -z "$JWT_SECRET" ]]; then
     echo "ERROR: JWT_SECRET not found in $REPO_DIR/.env"
     exit 1
 fi
 
+cd "$REPO_DIR"
 MODEL_SOURCE=huggingface JWT_SECRET="$JWT_SECRET" python3 run.py \
-    --model Wan2.2-T2V-A14B-Diffusers \
+    --model "$MODEL" \
     --workflow server \
-    --tt-device p150x4 \
-    --impl tt-transformers \
+    --tt-device p300x2 \
     --engine media \
     --docker-server \
     --override-docker-image "$DOCKER_IMAGE" \
@@ -144,10 +145,6 @@ WORKFLOW_PID=$!
 echo "Workflow PID: $WORKFLOW_PID"
 echo "Waiting for log file to appear in $LOG_DIR …"
 echo ""
-
-# ── Wait for run.py to finish launching Docker ────────────────────────────────
-# run.py exits with code 0 once Docker is running — that's normal, not an error.
-# We wait for it, then pick up the log file it created.
 
 wait "$WORKFLOW_PID"
 WORKFLOW_EXIT=$?
@@ -159,8 +156,6 @@ if [[ $WORKFLOW_EXIT -ne 0 ]]; then
     exit 1
 fi
 
-# ── Find the log file created by this run ─────────────────────────────────────
-# Pick the newest matching file whose mtime is >= when we started.
 LOG_FILE=$(ls -t "$LOG_DIR"/$LOG_GLOB 2>/dev/null \
            | while read -r f; do
                mtime=$(stat -c %Y "$f" 2>/dev/null || echo 0)
@@ -169,20 +164,25 @@ LOG_FILE=$(ls -t "$LOG_DIR"/$LOG_GLOB 2>/dev/null \
 
 if [[ -z "$LOG_FILE" ]]; then
     echo "WARNING: Could not find a new log file in $LOG_DIR"
-    echo "  Check manually, or run: docker logs -f \$(docker ps -lq)"
+    echo "  Check manually: docker logs -f \$(docker ps -lq)"
     exit 0
 fi
 
-# ── Tail the log ──────────────────────────────────────────────────────────────
-
 echo "Log file: $LOG_FILE"
 echo ""
-echo "Tip: the server prints 'Application startup complete' when ready (~5 min)."
+echo "Tip: the server prints 'Application startup complete' when ready (~3–5 min)."
+echo ""
+echo "API quick test (once ready):"
+echo "  curl -s -X POST http://localhost:8000/v1/images/generations \\"
+echo "    -H 'Authorization: Bearer \$(grep AUTHORIZATION_TOKEN ~/code/tt-inference-server/.env | cut -d= -f2)' \\"
+echo "    -H 'Content-Type: application/json' \\"
+echo "    -d '{\"prompt\":\"a red apple\",\"guidance_scale\":3.5}' \\"
+echo "    | python3 -c \"import sys,json,base64; d=json.load(sys.stdin); open('/tmp/test.jpg','wb').write(base64.b64decode(d['images'][0]))\""
+echo "  xdg-open /tmp/test.jpg"
 echo ""
 
 if [[ $GUI_MODE -eq 1 ]]; then
     # In GUI mode the caller monitors readiness via the health check endpoint.
-    # Don't tail — just exit so the subprocess terminates cleanly.
     echo "Server started in Docker. GUI health check will detect when ready."
     exit 0
 fi

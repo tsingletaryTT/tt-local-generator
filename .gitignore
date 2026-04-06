@@ -6,3 +6,7 @@ __pycache__/
 .worktrees/
 prompts/markov_output.txt
 batch_generate.log
+
+# Vendored tt-inference-server checkout (shallow clone, ~143 GB working tree).
+# Tracked only via vendor/VENDOR_SHA — not committed to git.
+vendor/

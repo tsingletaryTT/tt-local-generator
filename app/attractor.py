@@ -120,7 +120,6 @@ class AttractorPool:
         lower = min(self._pos + 1, len(self._order))
         insert_at = random.randint(lower, len(self._order))
         self._order.insert(insert_at, new_idx)
-        self._recalc_duration()
 
     def remove_record(self, record_id: str) -> bool:
         """
@@ -919,12 +918,15 @@ class AttractorWindow(Gtk.Window):
         self._stack.set_visible_child_name(next_name)
         self._active_slot_name = next_name
 
-        # Schedule the now-invisible slot's pipeline teardown after the crossfade
-        # (250 ms) plus a small safety margin.  This keeps steady-state pipeline
-        # count at 1 instead of 2, preventing fd accumulation over many cycles.
+        # Schedule the now-invisible slot's pipeline teardown.
+        # We use a fixed 500 ms delay regardless of the stack transition duration
+        # (which is 0 for the instant channel-change cut).  GStreamer needs time
+        # to walk its PLAYING→PAUSED→NULL state machine and actually close file
+        # descriptors — 50 ms (the old value) is too short; pipelines stack up
+        # faster than they release FDs, exhausting the 1024-fd process limit.
         self._slot_to_unload = prev_slot
         self._pending_unload_source = GLib.timeout_add(
-            self._stack.get_transition_duration() + 50,
+            500,
             self._on_unload_timer,
         )
 
@@ -991,11 +993,14 @@ class AttractorWindow(Gtk.Window):
             # (See CLAUDE.md: "Gtk.Video.set_loop(True) is unreliable")
             path = getattr(record, "video_path", None)
             if path:
-                # Pause then clear the slot's pipeline before loading the new file.
-                # Pausing first moves GStreamer from PLAYING→PAUSED synchronously,
-                # which dramatically shortens the subsequent PAUSED→NULL teardown
-                # triggered by set_file(None) and reduces fd accumulation.
-                _unload_slot_video(slot)
+                # Load the new file directly via set_filename.  The inactive slot
+                # was already unloaded by the 500 ms timer from the previous advance
+                # (_on_unload_timer → _unload_slot_video).  Calling _unload_slot_video
+                # here BEFORE set_filename causes a GStreamer race: the PLAYING→NULL
+                # teardown is asynchronous, so GStreamer threads still hold the old
+                # GstPoll object when the new pipeline starts initialising, producing
+                # bursts of "assertion 'set != NULL' failed" and eventually EMFILE.
+                # GTK's set_filename handles replacing an existing file safely.
                 slot._video.set_filename(path)
             slot._video.set_visible(True)
 
@@ -1152,7 +1157,7 @@ class AttractorWindow(Gtk.Window):
         self._on_enqueue(
             prompt=prompt,
             neg="",
-            steps=30,
+            steps=20,
             seed=-1,
             seed_image_path="",
             model_source=self._model_source,
@@ -1174,7 +1179,7 @@ class AttractorWindow(Gtk.Window):
         self._on_user_enqueue(
             prompt=text,
             neg="",
-            steps=30,
+            steps=20,
             seed=-1,
             seed_image_path="",
             model_source=self._model_source,
@@ -1452,16 +1457,155 @@ class AttractorWindow(Gtk.Window):
 
         return bar
 
-    def _att_status_poll_loop(self) -> None:
-        """Background thread: polls server status, disk, and chip telemetry every 10s."""
+    # ── Chip telemetry helpers (mirroring _StatusBar in main_window.py) ──────────
+
+    # Cached path to tt-smi (None = not yet resolved, "" = not available).
+    _tt_smi_path: "str | None" = None
+    _TT_SMI_SKIP = ""
+
+    # Known install locations beyond whatever is on PATH at desktop launch time.
+    _TT_SMI_SEARCH_PATHS = [
+        str(Path.home() / ".tenstorrent-venv" / "bin"),
+        "/usr/local/bin",
+        "/usr/bin",
+    ]
+
+    @classmethod
+    def _resolve_tt_smi(cls) -> "str | None":
+        """Return the absolute path to a usable tt-smi (>= 4.1), or None.
+
+        The desktop launcher strips ~/.tenstorrent-venv/bin from PATH, so we
+        search known locations explicitly.  Result is cached at class level.
+        """
+        import re
+        if cls._tt_smi_path is not None:
+            return cls._tt_smi_path or None   # "" sentinel → None
+
+        extended = shutil.which("tt-smi")  # whatever PATH has
+        # Build an augmented path string combining $PATH + known locations.
+        extra = ":".join(cls._TT_SMI_SEARCH_PATHS)
+        found = shutil.which("tt-smi", path=extra) or extended
+        if not found:
+            cls._tt_smi_path = cls._TT_SMI_SKIP
+            return None
+
+        try:
+            import subprocess as _sp
+            r = _sp.run(
+                [found, "--version"],
+                capture_output=True, text=True, timeout=5,
+                stdin=_sp.DEVNULL,
+            )
+            m = re.search(r"(\d+)\.(\d+)", (r.stdout + r.stderr).strip())
+            if m and (int(m.group(1)), int(m.group(2))) >= (4, 1):
+                cls._tt_smi_path = found
+                return found
+        except Exception:
+            pass
+
+        cls._tt_smi_path = cls._TT_SMI_SKIP
+        return None
+
+    @staticmethod
+    def _read_att_sysfs_clocks() -> list[int]:
+        """Read AICLK (MHz) for each chip from sysfs. Instant, no subprocess."""
+        clocks: list[int] = []
+        try:
+            base = Path("/sys/class/tenstorrent")
+            for chip_dir in sorted(base.glob("tenstorrent!*")):
+                try:
+                    clocks.append(int((chip_dir / "tt_aiclk").read_text().strip()))
+                except (OSError, ValueError):
+                    pass
+        except OSError:
+            pass
+        return clocks
+
+    @staticmethod
+    def _clock_to_shade(clock: int, max_clock: int) -> str:
+        """Map one chip's aiclk to a shade block relative to the fleet maximum."""
+        if max_clock <= 0:
+            return "░"
+        ratio = clock / max_clock
+        if ratio >= 0.85:
+            return "█"
+        if ratio >= 0.55:
+            return "▓"
+        if ratio >= 0.25:
+            return "▒"
+        return "░"
+
+    def _build_chip_text(self) -> str:
+        """Return a compact chip summary string for the TT-TV status bar.
+
+        Reads sysfs clocks (always available) for shade blocks + peak clock.
+        Adds avg temperature and total power from tt-smi when tt-smi >= 4.1.
+        """
         import json as _json
-        import subprocess as _subprocess
+        import subprocess as _sp
 
         def _f(val) -> float:
             try:
                 return float(val) if val is not None else 0.0
             except (TypeError, ValueError):
                 return 0.0
+
+        parts: list[str] = []
+
+        # Layer 1: sysfs clocks — instant, no subprocess.
+        clocks = self._read_att_sysfs_clocks()
+        if clocks:
+            max_clk = max(clocks)
+            shade_str = "".join(self._clock_to_shade(c, max_clk) for c in clocks)
+            parts.append(f"{max_clk} MHz")
+        else:
+            shade_str = ""
+
+        # Layer 2: tt-smi avg temp + total power (when available).
+        tt_smi = self._resolve_tt_smi()
+        if tt_smi:
+            try:
+                result = _sp.run(
+                    [tt_smi, "-s"],
+                    capture_output=True, text=True, timeout=8,
+                    stdin=_sp.DEVNULL,
+                )
+                if result.returncode == 0:
+                    data = _json.loads(result.stdout)
+                    chips = data.get("device_info", [])
+                    if chips:
+                        temps  = [_f(c.get("telemetry", {}).get("asic_temperature"))
+                                  for c in chips]
+                        powers = [_f(c.get("telemetry", {}).get("power"))
+                                  for c in chips]
+                        valid_temps = [t for t in temps if t > 0]
+                        if valid_temps:
+                            parts.insert(0, f"{sum(valid_temps)/len(valid_temps):.0f}°C")
+                        if any(p > 0 for p in powers):
+                            idx = 1 if parts and "°C" in parts[0] else 0
+                            parts.insert(idx, f"{sum(powers):.0f}W")
+            except Exception:
+                pass   # tt-smi failed — show clock + shade blocks from sysfs only
+
+        if shade_str:
+            parts.append(shade_str)
+
+        return "  ".join(parts)
+
+    def _att_status_poll_loop(self) -> None:
+        """Background thread: polls server status, disk, and chip telemetry every 10 s.
+
+        Two-stage chip read so the segment is never blank at startup:
+          Stage 1 — sysfs clocks only (instant, posted before anything blocks).
+          Stage 2 — full telemetry via tt-smi (may take up to ~13 s on cold start).
+        """
+        # Stage 1: post an instant sysfs-only baseline so _att_chip_lbl is visible
+        # immediately, before the slow tt-smi version check + snapshot run.
+        clocks = self._read_att_sysfs_clocks()
+        if clocks:
+            max_clk = max(clocks)
+            shade_str = "".join(self._clock_to_shade(c, max_clk) for c in clocks)
+            GLib.idle_add(self._apply_att_chip, f"{max_clk} MHz  {shade_str}")
 
         while not self._att_poll_stop.is_set():
             ready, model = self._get_server_status()
@@ -1474,29 +1618,20 @@ class AttractorWindow(Gtk.Window):
             except OSError:
                 disk_text = "disk ?"
 
-            chip_text = ""
-            try:
-                proc = _subprocess.run(
-                    ["tt-smi", "-s"], capture_output=True, text=True, timeout=5
-                )
-                if proc.returncode == 0:
-                    data = _json.loads(proc.stdout)
-                    chips = data.get("device_info", [])
-                    if chips:
-                        temps  = [_f(c.get("telemetry", {}).get("asic_temperature")) for c in chips]
-                        powers = [_f(c.get("telemetry", {}).get("power"))            for c in chips]
-                        clocks = [_f(c.get("telemetry", {}).get("aiclk"))            for c in chips]
-                        parts: list[str] = []
-                        if any(temps):  parts.append(f"{max(temps):.0f}°C")
-                        if any(powers): parts.append(f"{sum(powers):.0f}W")
-                        if any(clocks): parts.append(f"{max(clocks):.0f}MHz")
-                        chip_text = "  ".join(parts)
-            except Exception:
-                pass
+            # Full telemetry (may block up to ~13 s on first call while tt-smi loads).
+            chip_text = self._build_chip_text()
 
             GLib.idle_add(self._update_att_statusbar,
                           ready, model or "", depth, generating, disk_text, chip_text)
             self._att_poll_stop.wait(10.0)
+
+    def _apply_att_chip(self, chip_text: str) -> bool:
+        """Update only the chip telemetry label. Called from Stage 1 sysfs read."""
+        if not self._alive:
+            return False
+        self._att_chip_lbl.set_label(chip_text)
+        self._att_chip_lbl.set_visible(bool(chip_text))
+        return False
 
     def _update_att_statusbar(
         self, ready: bool, model: str, depth: int,
@@ -1534,9 +1669,8 @@ class AttractorWindow(Gtk.Window):
         # Disk
         self._att_disk_lbl.set_label(disk_text)
 
-        # Chip telemetry
-        self._att_chip_lbl.set_label(chip_text)
-        self._att_chip_lbl.set_visible(bool(chip_text))
+        # Chip telemetry (reuses the single-label helper for consistency)
+        self._apply_att_chip(chip_text)
 
         return False
 

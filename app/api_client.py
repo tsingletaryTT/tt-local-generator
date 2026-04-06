@@ -99,17 +99,23 @@ class APIClient:
         """
         Check if the server is running and responsive.
 
-        Returns True if the server replies 200 to /tt-liveness.
-        Timeout is generous (15 s) because the server can be slow to respond
-        while the TT hardware is saturated during active inference.
+        Returns True if the server replies 200 to /tt-liveness OR if the
+        request times out.  Timeout is treated as "server alive but busy"
+        because the TT inference event loop can be saturated during generation
+        (Wan2.2 inference blocks for 3–5 min) and the health endpoint may not
+        get a chance to reply within the window.  A connection refused or
+        reset is a definitive signal that nothing is listening on the port.
         """
         try:
             resp = requests.get(
                 f"{self.base_url}/tt-liveness",
-                timeout=15,
+                timeout=20,
                 headers=self._headers(),
             )
             return resp.status_code == 200
+        except requests.exceptions.Timeout:
+            # Server is listening but too busy to reply — treat as alive.
+            return True
         except requests.RequestException:
             return False
 

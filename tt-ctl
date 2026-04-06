@@ -9,6 +9,11 @@ history.json files that the GUI persists on every mutation.
 
 Usage:
     tt-ctl status                   Server health, queue depth, history summary
+    tt-ctl servers                  Live status of every managed service
+    tt-ctl start <service>          Start a service (wan2.2 | mochi | flux | animate |
+                                    prompt-server | all)
+    tt-ctl stop  <service>          Stop a service (same keys as start)
+    tt-ctl restart <service>        Stop then re-start a service
     tt-ctl queue                    List pending queue items
     tt-ctl queue add "prompt"       Append a prompt to the persistent queue
     tt-ctl queue clear              Empty the queue (does not cancel in-flight jobs)
@@ -31,13 +36,14 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
-# ── Make sure the project root is importable ──────────────────────────────────
+# ── Make sure app/ is importable ─────────────────────────────────────────────
 _HERE = Path(__file__).resolve().parent
-sys.path.insert(0, str(_HERE))
+sys.path.insert(0, str(_HERE / "app"))
 
 from api_client import APIClient          # noqa: E402
 from history_store import HistoryStore    # noqa: E402
 from worker import GenerationWorker       # noqa: E402
+import server_manager as sm              # noqa: E402
 
 
 # ── Colour helpers (plain text when stdout is not a tty) ──────────────────────
@@ -83,6 +89,91 @@ def _age(iso: str) -> str:
         return f"{s//86400}d ago"
     except Exception:
         return ""
+
+
+# ── servers ───────────────────────────────────────────────────────────────────
+
+def cmd_servers(args):
+    """Print live status of every managed service."""
+    statuses = sm.status_all(timeout=2.0)
+    print(bold("Managed services"))
+    for key, sdef in sm.SERVERS.items():
+        alive = statuses.get(key, False)
+        dot   = green("●") if alive else dim("○")
+        state = green("running") if alive else dim("offline")
+        print(f"  {dot}  {teal(key):<18s}  {state:<10s}  {dim(sdef.label)}")
+    print()
+    print(dim("Start/stop:  tt-ctl start <service>  |  tt-ctl stop <service>"))
+    print(dim(f"Services:    {' | '.join(sm.SERVERS)} | all"))
+
+
+def cmd_start(args):
+    key = args.service
+    try:
+        sdefs = sm._resolve(key)
+    except KeyError as e:
+        print(red(str(e)))
+        sys.exit(1)
+
+    for sdef in sdefs:
+        print(f"Starting {teal(sdef.key)} — {sdef.label}…")
+
+    results = sm.start(key, gui=not args.blocking)
+
+    for sdef, result in zip(sdefs, results):
+        if result.returncode == 0:
+            print(green("✓") + f"  {sdef.key} started")
+            if result.stdout.strip():
+                for line in result.stdout.strip().splitlines()[-4:]:
+                    print(dim(f"     {line}"))
+        else:
+            print(red("✗") + f"  {sdef.key} failed (exit {result.returncode})")
+            if result.stderr.strip():
+                for line in result.stderr.strip().splitlines()[-6:]:
+                    print(red(f"     {line}"))
+
+
+def cmd_stop(args):
+    key = args.service
+    try:
+        sdefs = sm._resolve(key)
+    except KeyError as e:
+        print(red(str(e)))
+        sys.exit(1)
+
+    for sdef in sdefs:
+        print(f"Stopping {teal(sdef.key)}…")
+
+    results = sm.stop(key)
+
+    for sdef, result in zip(sdefs, results):
+        if result.returncode == 0:
+            print(green("✓") + f"  {sdef.key} stopped")
+        else:
+            print(red("✗") + f"  {sdef.key} stop failed (exit {result.returncode})")
+            if result.stderr.strip():
+                for line in result.stderr.strip().splitlines()[-4:]:
+                    print(red(f"     {line}"))
+
+
+def cmd_restart(args):
+    key = args.service
+    try:
+        sdefs = sm._resolve(key)
+    except KeyError as e:
+        print(red(str(e)))
+        sys.exit(1)
+
+    print(f"Restarting {teal(key)}…")
+    sm.stop(key)
+    print(dim("  stopped — starting…"))
+    results = sm.start(key, gui=not args.blocking)
+
+    for sdef, result in zip(sdefs, results):
+        if result.returncode == 0:
+            print(green("✓") + f"  {sdef.key} restarted")
+        else:
+            print(red("✗") + f"  {sdef.key} restart failed (exit {result.returncode})")
 
 
 # ── status ────────────────────────────────────────────────────────────────────
@@ -185,7 +276,7 @@ def cmd_history(args):
     store = HistoryStore()
     recs  = store.all_records()
     n     = getattr(args, "n", 10)
-    shown = recs[-n:][::-1]   # newest first
+    shown = recs[:n]          # all_records() is already newest-first
 
     if not shown:
         print(dim("No history yet."))
@@ -380,6 +471,21 @@ def _build_parser() -> argparse.ArgumentParser:
     # status
     sub.add_parser("status", help="Server health, queue depth, history summary")
 
+    # servers
+    sub.add_parser("servers", help="Live status of every managed service")
+
+    # start / stop / restart
+    _service_choices = sorted(sm.SERVERS.keys()) + [sm.ALL_KEY]
+    _service_help = " | ".join(_service_choices)
+
+    for _verb in ("start", "stop", "restart"):
+        _sp = sub.add_parser(_verb, help=f"{_verb.capitalize()} a managed service")
+        _sp.add_argument("service", choices=_service_choices, metavar="SERVICE",
+                         help=_service_help)
+        if _verb != "stop":
+            _sp.add_argument("--blocking", action="store_true",
+                             help="Wait for the script to exit (default: --gui mode)")
+
     # queue
     q = sub.add_parser("queue", help="Manage the persistent queue")
     qsub = q.add_subparsers(dest="queue_cmd", metavar="SUBCOMMAND")
@@ -424,6 +530,10 @@ def main():
 
     dispatch = {
         "status":  cmd_status,
+        "servers": cmd_servers,
+        "start":   cmd_start,
+        "stop":    cmd_stop,
+        "restart": cmd_restart,
         "queue":   cmd_queue,
         "history": cmd_history,
         "server":  cmd_server,

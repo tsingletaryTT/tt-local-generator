@@ -14,6 +14,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 usage() {
     sed -n '2,10p' "$0" | sed 's/^# \?//'
@@ -57,7 +58,7 @@ cmd_start() {
         echo "  ● Wan2.2 already running — skipping"
     else
         echo "  Starting Wan2.2 inference server (--gui, background)…"
-        "$SCRIPT_DIR/start_wan.sh" --gui
+        "$SCRIPT_DIR/start_wan_qb2.sh" --gui
         echo "  ✓ Wan2.2 server started — loading model in background (~5 min)"
         echo "    Watch: tail -f ~/code/tt-inference-server/workflow_logs/docker_server/media_*.log | grep -v 'tt-liveness'"
     fi
@@ -77,7 +78,7 @@ cmd_start() {
     echo ""
     echo "Both services started. The Wan2.2 server takes ~5 min to finish loading."
     echo "Run './best_experience_services.sh status' to check state, or open the app:"
-    echo "  /usr/bin/python3 $SCRIPT_DIR/main.py"
+    echo "  /usr/bin/python3 $REPO_ROOT/main.py"
 }
 
 cmd_stop() {
@@ -87,7 +88,7 @@ cmd_stop() {
     # ── Wan2.2 inference server ────────────────────────────────────────────
     if wan_running; then
         echo "  Stopping Wan2.2 inference server…"
-        "$SCRIPT_DIR/start_wan.sh" --stop
+        "$SCRIPT_DIR/start_wan_qb2.sh" --stop
     else
         echo "  ○ Wan2.2 not running — skipping"
     fi

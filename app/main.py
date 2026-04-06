@@ -73,6 +73,13 @@ def main():
     app.set_flags(Gio.ApplicationFlags.NON_UNIQUE)
 
     def on_activate(application):
+        # Register the "quit" action on the application object so that menu
+        # items using "app.quit" work.  Gtk.Application does NOT register this
+        # automatically — it must be added explicitly.
+        quit_action = Gio.SimpleAction.new("quit", None)
+        quit_action.connect("activate", lambda *_: application.quit())
+        application.add_action(quit_action)
+
         win = MainWindow(app=application, server_url=args.server)
         # Set window icon from bundled asset; fall back gracefully if missing.
         if _ICON_PATH.exists():

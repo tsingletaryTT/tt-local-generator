@@ -244,6 +244,99 @@ SUBJECTS = (
     SUBJECTS_KING + SUBJECTS_KAFKA + SUBJECTS_GENERAL
 )
 
+# ── Commercial subjects & settings ────────────────────────────────────────────
+# Products, objects, and scenarios for "short commercial" style prompts.
+# Intentionally absurd, retro, and specific — the generator leans into
+# the visual grammar of mid-century TV spots and mail-order catalog culture.
+
+SUBJECTS_COMMERCIAL_PRODUCTS = [
+    # Soups & food
+    "a can of chicken noodle soup spinning slowly in a white void, steam rising",
+    "a bowl of tomato soup reflecting a family dinner table, lit from above",
+    "a can of cream of mushroom soup stacking itself onto a pyramid of identical cans",
+    "a single spoonful of soup approaching the camera in extreme close-up",
+    "a can of beef stew opening itself on a marble countertop, perfectly lit",
+    # Computers & tech
+    "a beige desktop computer glowing alone in a dark study, 1983",
+    "a floppy disk inserting itself into a drive, the drive clicking shut",
+    "a dot-matrix printer unspooling a banner that fills the room",
+    "a keyboard with one key lit — the ENTER key — in a dark office",
+    "a modem handshaking — two tones, then a burst of static, then silence",
+    "a personal computer booting into a READY prompt on a phosphor-green CRT",
+    # Mail-order novelties & animals
+    "a cardboard box with air holes, shaking slightly, on a suburban doorstep",
+    "sea monkeys materializing in a backlit glass tank, small and translucent",
+    "a baby alligator in a shoebox lined with a damp towel, blinking once",
+    "x-ray glasses on a nose, the world briefly visible as overlapping skeletons",
+    "a set of sea monkeys at a tiny table, unboxing a tinier package",
+    "a chameleon arriving in bubble wrap, one eye opening on a kitchen counter",
+    "a small monkey in a knitted vest sitting in a crate stamped FRAGILE",
+    "a hermit crab selecting a new shell from an assortment on a tile floor",
+    # Household goods & appliances
+    "a vacuum cleaner moving across carpet in an otherwise empty room, efficient",
+    "a blender demolishing a single perfect strawberry in slow motion",
+    "a can opener going around a can in one clean unbroken motion",
+    "a set of steak knives fanning out on velvet under a single spotlight",
+    "a record club mailer opening itself, twelve albums spreading across a kitchen table",
+    "a set of encyclopedias standing at attention on a white shelf, spines identical",
+    "a steam iron gliding across a white shirt, all wrinkles fleeing before it",
+    # Cereal & breakfast
+    "a cereal box with a cartoon mascot that turns to face the camera",
+    "a spoonful of cereal launching from the bowl in slow motion, catching light",
+    "a box of cereal dissolving into a bowl of milk in reverse",
+    "a toy prize emerging slowly from the bottom of a cereal box",
+    # Miscellaneous mail-order & catalog
+    "a Ronco dehydrator running on a kitchen counter in the dark, LED blinking",
+    "a Chia Pet sprouting in time-lapse on a windowsill",
+    "a model airplane kit laid out perfectly on a card table in a rec room",
+    "a coin-operated telescope on a boardwalk pointing at something off-screen",
+    "a Clapper turning a lamp on and off in an empty den, rhythmically",
+]
+
+SETTINGS_COMMERCIAL = [
+    # Studio/product environments
+    "a pure white infinity cove with a single product at exact center",
+    "a seamless grey cyclorama, key light from the left, fill from below",
+    "a rotating turntable under a product, slow quarter-turn, dark background",
+    "a kitchen set from 1978 — avocado appliances, linoleum, warm overhead light",
+    "a living room from a Sears catalog — coordinated plaid, a ficus in the corner",
+    "a spotlit countertop with nothing else in the frame",
+    "a glass table with a reflective surface, product placed dead center",
+    "a department store window display at night, no pedestrians, objects lit from inside",
+    # Lifestyle shots
+    "a family of four eating dinner together, every surface freshly cleaned",
+    "a housewife in an apron turning to face camera mid-task, genuinely pleased",
+    "two children running toward a camera in a backyard on a perfect Saturday",
+    "a man in a turtleneck holding a product and nodding with quiet confidence",
+    "a mother handing a bowl to a child who accepts it with total sincerity",
+    # Testimonial & demonstration
+    "a hand demonstrating product in close-up, moving slowly to show features",
+    "a before/after split screen — left half dingy, right half immaculate",
+    "a cutaway diagram of a product hovering over the product itself",
+    "a comparison test — two identical objects, one labeled BRAND X — watched by a crowd",
+    "a superimposed graphic reading NEW AND IMPROVED dissolving over a product shot",
+    # Retro/absurd
+    "a cartoon starburst exploding behind a product, rays pulsing outward",
+    "a phone number at the bottom of the frame — 1-800 — in bright yellow",
+    "a studio audience audibly impressed by a product demonstration off-screen",
+    "a product appearing from a cloud of colored smoke on an empty stage",
+    "an announcer's disembodied hand gesturing at a product from off-frame",
+]
+
+# Commercial-specific camera and copy language
+COMMERCIAL_COPY_HOOKS = [
+    "focus on the product — hold on it",
+    "beauty shot, slow rotation",
+    "extreme close-up on the label",
+    "product in hero position, camera pushing in",
+    "wide to tight — establishing then isolating the product",
+    "soft focus background, product razor-sharp",
+    "product catches the light as it turns",
+    "two-second hold on the product after the action",
+    "product drops into frame, perfectly still",
+    "camera orbits the product slowly at table height",
+]
+
 # ── Actions ────────────────────────────────────────────────────────────────────
 
 ACTIONS_TRAJECTORY = [
@@ -1042,6 +1135,7 @@ _SUBJECT_REGISTERS = {
     "king": SUBJECTS_KING,
     "kafka": SUBJECTS_KAFKA,
     "general": SUBJECTS_GENERAL,
+    "commercial": SUBJECTS_COMMERCIAL_PRODUCTS,
 }
 
 _SETTING_REGISTERS = {
@@ -1116,3 +1210,18 @@ def quality_tags(n: int = 2) -> str:
 def director_style() -> str:
     """Return a random director-inspired cinematic style string."""
     return pick(CINEMATIC_DIRECTORS)
+
+
+def commercial_product() -> str:
+    """Return a random commercial product subject."""
+    return pick(SUBJECTS_COMMERCIAL_PRODUCTS)
+
+
+def commercial_setting() -> str:
+    """Return a random commercial-style setting."""
+    return pick(SETTINGS_COMMERCIAL)
+
+
+def commercial_copy_hook() -> str:
+    """Return a random product-focus camera/copy directive."""
+    return pick(COMMERCIAL_COPY_HOOKS)

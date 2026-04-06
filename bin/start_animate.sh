@@ -28,7 +28,14 @@
 
 set -euo pipefail
 
-REPO_DIR="$HOME/code/tt-inference-server"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+if [[ -d "$REPO_ROOT/vendor/tt-inference-server" ]]; then
+    REPO_DIR="$REPO_ROOT/vendor/tt-inference-server"
+else
+    REPO_DIR="$HOME/code/tt-inference-server"
+fi
 HF_CACHE="$HOME/.cache/huggingface"
 DOCKER_IMAGE="ghcr.io/tenstorrent/tt-media-inference-server:0.10.0-555f240"
 MODEL="Wan2.2-Animate-14B-Diffusers"

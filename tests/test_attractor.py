@@ -2,7 +2,7 @@
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock
-sys.path.insert(0, str(Path(__file__).parent.parent))
+sys.path.insert(0, str(Path(__file__).parent.parent / "app"))
 
 from attractor import AttractorPool
 
@@ -52,15 +52,15 @@ def test_pool_add_record_appears_later_in_cycle():
     remaining = [pool.advance() for _ in range(3)]
     assert 4 in remaining, "New record must appear later in current cycle"
 
-def test_avg_video_duration_uses_video_durations():
-    recs = [_rec("video", 6.0), _rec("video", 10.0), _rec("image", 0.0)]
-    pool = AttractorPool(recs)
-    assert pool.avg_video_duration == 8.0
+def test_scheduling_constants_are_positive():
+    # IMAGE_DWELL_MS and VIDEO_FALLBACK_MS must be positive integers.
+    # duration_s is inference time, not playback time — not used for scheduling.
+    assert AttractorPool.IMAGE_DWELL_MS > 0
+    assert AttractorPool.VIDEO_FALLBACK_MS > 0
 
-def test_avg_video_duration_defaults_when_no_videos():
-    recs = [_rec("image", 0.0), _rec("image", 0.0)]
-    pool = AttractorPool(recs)
-    assert pool.avg_video_duration == 8.0
+def test_video_fallback_longer_than_image_dwell():
+    # Videos need more display time than stills.
+    assert AttractorPool.VIDEO_FALLBACK_MS > AttractorPool.IMAGE_DWELL_MS
 
 def test_current_record_returns_correct_record():
     recs = [_rec() for _ in range(3)]
