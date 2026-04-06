@@ -2662,9 +2662,12 @@ class ControlPanel(Gtk.Box):
         sep.set_margin_bottom(4)
         outer.append(sep)
 
-        # One row per server.  Store dot/label refs so refresh can update them.
+        # One row per server.  Store widget refs so refresh and action feedback can update them.
         self._servers_popover_dots: dict[str, Gtk.Label]  = {}
         self._servers_popover_states: dict[str, Gtk.Label] = {}
+        self._servers_popover_start_btns: dict[str, Gtk.Button] = {}
+        self._servers_popover_stop_btns: dict[str, Gtk.Button] = {}
+        self._servers_popover_restart_btns: dict[str, Gtk.Button] = {}
 
         for key, sdef in _sm.SERVERS.items():
             row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
@@ -2696,6 +2699,7 @@ class ControlPanel(Gtk.Box):
                 "clicked",
                 lambda _b, k=key: self._on_servers_action(k, "start"),
             )
+            self._servers_popover_start_btns[key] = start_btn
             row.append(start_btn)
 
             # Stop button
@@ -2707,6 +2711,7 @@ class ControlPanel(Gtk.Box):
                 "clicked",
                 lambda _b, k=key: self._on_servers_action(k, "stop"),
             )
+            self._servers_popover_stop_btns[key] = stop_btn
             row.append(stop_btn)
 
             # Restart button
@@ -2717,6 +2722,7 @@ class ControlPanel(Gtk.Box):
                 "clicked",
                 lambda _b, k=key: self._on_servers_action(k, "restart"),
             )
+            self._servers_popover_restart_btns[key] = restart_btn
             row.append(restart_btn)
 
             outer.append(row)
@@ -2742,8 +2748,31 @@ class ControlPanel(Gtk.Box):
             dot.add_css_class("servers-popover-dot-on" if alive else "servers-popover-dot-off")
         return GLib.SOURCE_REMOVE
 
+    def _set_server_row_busy(self, key: str, busy: bool) -> bool:
+        """Disable/re-enable all buttons for a server row.  Must run on main thread."""
+        for btn_dict in (
+            self._servers_popover_start_btns,
+            self._servers_popover_stop_btns,
+            self._servers_popover_restart_btns,
+        ):
+            if key in btn_dict:
+                btn_dict[key].set_sensitive(not busy)
+        return GLib.SOURCE_REMOVE
+
     def _on_servers_action(self, key: str, action: str) -> None:
-        """Run start/stop/restart in a background thread to avoid blocking the UI."""
+        """Run start/stop/restart in a background thread to avoid blocking the UI.
+
+        On start/restart, buttons are disabled immediately and a poll loop waits
+        up to 90 s for the server to become healthy before re-enabling them.
+        On stop the dot is refreshed once after the script exits.
+        """
+        # Immediate visual feedback — disable the row while the action runs.
+        GLib.idle_add(self._set_server_row_busy, key, True)
+        # Update the dot to a neutral "working" state.
+        dot = self._servers_popover_dots.get(key)
+        if dot:
+            GLib.idle_add(dot.set_label, "◌")
+
         def _worker():
             try:
                 if action == "start":
@@ -2754,9 +2783,20 @@ class ControlPanel(Gtk.Box):
                     _sm.restart(key, gui=True)
             except Exception:
                 pass
-            # Refresh dots after action completes.
+
+            if action in ("start", "restart"):
+                # Poll until healthy (up to 90 s) so the dot turns green when ready.
+                import time as _time
+                deadline = _time.monotonic() + 90
+                while _time.monotonic() < deadline:
+                    if _sm.is_healthy(key, timeout=2.0):
+                        break
+                    _time.sleep(3)
+
+            # Final refresh: update all dots and re-enable buttons.
             statuses = _sm.status_all(timeout=2.0)
             GLib.idle_add(self._apply_servers_status, statuses)
+            GLib.idle_add(self._set_server_row_busy, key, False)
 
         threading.Thread(target=_worker, daemon=True).start()
 
