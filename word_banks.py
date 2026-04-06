@@ -130,24 +130,31 @@ SUBJECTS_ROBBINS = [
 ]
 
 SUBJECTS_KING = [
+    # The Shining
     "two identical girls at the end of a hotel corridor",
-    "a clown shoe floating in a storm drain on Witcham Street",
-    "a dog that won't come out of the fog no matter what you call",
-    "the new neighbor who smiles too much and doesn't blink at the right times",
+    "a room in a hotel that the cleaning staff refuses to enter",
+    "a man who writes the same sentence in his sleep every night",
+    "a hedge maze in hard winter light, footprints leading in but not out",
+    # The Dark Tower
+    "a gunslinger crossing a desert that has no end, following a figure ahead",
+    "a door standing alone on a beach with no building around it",
+    "a boy who speaks in a voice that belongs to someone long dead",
+    "a tower on the horizon visible from everywhere, belonging to no landscape",
+    # ESP / Firestarter / Carrie
+    "a child who sets things on fire without touching them, standing very still",
+    "a girl who moved something with her mind and hasn't told anyone",
+    "a government vehicle parked outside a school, same spot, three days running",
+    "a child pressing both palms flat on a table, eyes closed, concentrating",
+    # General King dread
     "a mailbox that keeps filling with yesterday's newspaper",
     "a pet cemetery tilting toward the tree line in Maine",
-    "a kid who sees dead people at the breakfast table and has learned not to mention it",
     "a car that started itself in a locked garage",
     "a telephone ringing in a house where everyone is outside",
     "a woman who has started keeping a list of things that have moved on their own",
-    "a face in a drain that is not quite a face",
-    "a room in a motel that the cleaning staff refuses to enter",
     "a crow that keeps calling in a voice the neighbors half-recognize",
     "a library book returned 40 years late with a note written in someone else's blood",
-    "a child who knows what's in the basement and has decided not to check",
-    "a man who writes the same sentence in his sleep every night",
-    "an old woman who has been watching the same road for sixty years",
-    "a figure in a yellow raincoat standing in rain that stopped an hour ago",
+    "a man who knows the exact date of his death and keeps rescheduling things anyway",
+    "a dog that won't come out of the fog no matter what you call",
 ]
 
 SUBJECTS_KAFKA = [
