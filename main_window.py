@@ -3508,40 +3508,124 @@ class _StatusBar(Gtk.Box):
             chip_text = self._read_chip_telemetry()
             GLib.idle_add(self._apply_chip, chip_text)
 
-    @staticmethod
-    def _read_chip_telemetry() -> str:
-        """Query `tt-smi -s` and return a compact summary string, or '' if unavailable."""
+    # ── Chip telemetry: sysfs baseline + optional tt-smi enhancement ──────────
+    #
+    # Primary source (always): /sys/class/tenstorrent/tenstorrent!N/tt_aiclk
+    #   Passive kernel sysfs read — no subprocess, no PATH issues, instant.
+    #
+    # Enhancement layer (when tt-smi >= 4.1 is reachable): tt-smi -s snapshot
+    #   Adds ASIC temperature and total board power.
+    #   tt-smi lives in a virtualenv not on the default PATH, so we search
+    #   known locations once and cache the resolved path at class level.
+    #   Version is checked once; if < 4.1 or not found, the class-level flag
+    #   is set to _TT_SMI_SKIP so no further subprocess calls are made.
+
+    _tt_smi_path: "str | None" = None   # None = not yet resolved
+    _TT_SMI_SKIP = ""                   # sentinel stored in _tt_smi_path when unavailable
+
+    # Known locations to search for tt-smi beyond the inherited PATH.
+    _TT_SMI_SEARCH_PATHS = [
+        str(Path.home() / ".tenstorrent-venv" / "bin"),
+        "/usr/local/bin",
+        "/usr/bin",
+    ]
+
+    @classmethod
+    def _resolve_tt_smi(cls) -> "str | None":
+        """Return the absolute path to a usable tt-smi (>= 4.1), or None.
+
+        Result is cached at class level so the version check only ever runs once.
+        """
+        import re, shutil as sh
+        if cls._tt_smi_path is not None:
+            return cls._tt_smi_path or None   # "" sentinel → None
+
+        extended = (os.environ.get("PATH", "") + os.pathsep
+                    + os.pathsep.join(cls._TT_SMI_SEARCH_PATHS))
+        found = sh.which("tt-smi", path=extended)
+        if not found:
+            cls._tt_smi_path = cls._TT_SMI_SKIP
+            return None
+
         try:
-            result = subprocess.run(
-                ["tt-smi", "-s"],
-                capture_output=True, text=True, timeout=8,
+            r = subprocess.run(
+                [found, "--version"],
+                capture_output=True, text=True, timeout=5,
                 stdin=subprocess.DEVNULL,
             )
-            if result.returncode != 0:
-                return ""
-            data = json.loads(result.stdout)
-            chips = data.get("device_info", [])
-            if not chips:
-                return ""
+            m = re.search(r"(\d+)\.(\d+)", (r.stdout + r.stderr).strip())
+            if m and (int(m.group(1)), int(m.group(2))) >= (4, 1):
+                cls._tt_smi_path = found
+                return found
+        except Exception:
+            pass
 
-            def _f(val) -> float:
-                """Coerce tt-smi JSON values (may be int, float, or string) to float."""
+        cls._tt_smi_path = cls._TT_SMI_SKIP
+        return None
+
+    @staticmethod
+    def _read_sysfs_clocks() -> list[int]:
+        """Read AICLK (MHz) for each chip from sysfs. Never raises."""
+        clocks: list[int] = []
+        try:
+            base = Path("/sys/class/tenstorrent")
+            for chip_dir in sorted(base.glob("tenstorrent!*")):
                 try:
-                    return float(val) if val is not None else 0.0
-                except (TypeError, ValueError):
-                    return 0.0
+                    clocks.append(int((chip_dir / "tt_aiclk").read_text().strip()))
+                except (OSError, ValueError):
+                    pass
+        except OSError:
+            pass
+        return clocks
 
-            temps  = [_f(c.get("telemetry", {}).get("asic_temperature")) for c in chips]
-            powers = [_f(c.get("telemetry", {}).get("power")) for c in chips]
-            clocks = [_f(c.get("telemetry", {}).get("aiclk")) for c in chips]
-            parts: list[str] = []
-            if any(temps):  parts.append(f"{max(temps):.0f}°C")
-            if any(powers): parts.append(f"{sum(powers):.0f}W")
-            if any(clocks): parts.append(f"{max(clocks):.0f}MHz")
-            return "  ".join(parts)
-        except (subprocess.TimeoutExpired, FileNotFoundError,
-                json.JSONDecodeError, OSError, KeyError):
-            return ""
+    @staticmethod
+    def _f(val) -> float:
+        """Coerce tt-smi JSON values (may be int, float, or leading-space string) to float."""
+        try:
+            return float(val) if val is not None else 0.0
+        except (TypeError, ValueError):
+            return 0.0
+
+    def _read_chip_telemetry(self) -> str:
+        """Return a compact chip summary string for the status bar.
+
+        Always reads clock from sysfs (passive, no subprocess).
+        Adds temperature and power from tt-smi snapshot when tt-smi >= 4.1
+        is available.  Falls back gracefully at each layer.
+        """
+        parts: list[str] = []
+
+        # ── Layer 1: sysfs clocks (always) ────────────────────────────────────
+        clocks = self._read_sysfs_clocks()
+        if clocks:
+            parts.append(f"{max(clocks)} MHz")
+
+        # ── Layer 2: tt-smi temp + power (when available) ─────────────────────
+        tt_smi = self._resolve_tt_smi()
+        if tt_smi:
+            try:
+                result = subprocess.run(
+                    [tt_smi, "-s"],
+                    capture_output=True, text=True, timeout=8,
+                    stdin=subprocess.DEVNULL,
+                )
+                if result.returncode == 0:
+                    data = json.loads(result.stdout)
+                    chips = data.get("device_info", [])
+                    if chips:
+                        temps  = [self._f(c.get("telemetry", {}).get("asic_temperature"))
+                                  for c in chips]
+                        powers = [self._f(c.get("telemetry", {}).get("power"))
+                                  for c in chips]
+                        if any(t > 0 for t in temps):
+                            parts.insert(0, f"{max(temps):.0f}°C")
+                        if any(p > 0 for p in powers):
+                            parts.insert(1 if parts and "°C" in parts[0] else 0,
+                                         f"{sum(powers):.0f}W")
+            except Exception:
+                pass  # tt-smi failed this poll — show clock-only from sysfs
+
+        return "  ".join(parts)
 
     def stop(self) -> None:
         """Signal the background polling thread to exit. Call from do_close_request."""
