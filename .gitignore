@@ -10,3 +10,8 @@ batch_generate.log
 # Vendored tt-inference-server checkout (shallow clone, ~143 GB working tree).
 # Tracked only via vendor/VENDOR_SHA — not committed to git.
 vendor/
+
+# Docker image archive (~7.9 GB) — too large for GitHub LFS (2 GB limit).
+# Distribute separately (SCP, rsync, direct download).
+docker/*.tar.gz
+docker/*.tar
