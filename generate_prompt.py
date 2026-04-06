@@ -204,21 +204,19 @@ _ALGO_FN = {
 # produce longer or better clips — they just dilute the core image.
 _POLISH_SYSTEM = (
     "You are a cinematic prompt editor for AI video generation. "
-    "You receive a slug (comma-separated scene elements) and rewrite it as one "
-    "vivid, specific sentence. Keep every element given. No additions. "
-    "Target: 30-40 words. No preamble, no quotes, no explanation. "
-    "Never add gore, body horror, graphic violence, jump-scare framing, or disturbing imagery."
+    "Rewrite the slug as one tight, vivid sentence. "
+    "Keep every element. Add nothing. Cut all filler ('bathed in', 'as if', 'seems to', adverb stacks). "
+    "Hard limit: 25 words. No preamble, no quotes, no explanation. "
+    "Never add gore, body horror, graphic violence, or disturbing imagery."
 )
 
 _TYPE_HINT = {
     "video": (
-        "Video prompt (4-6 second clip). One contained action, one location. "
-        "Include one camera or motion cue. Stay under 40 words."
+        "Video (4-6 s clip). One action, one location, one camera cue. Under 25 words."
     ),
-    "image": "Image prompt. End with style/quality tags (e.g. 35mm film grain, sharp focus).",
+    "image": "Image. End with 2-3 style tags (e.g. 35mm grain, sharp focus). Under 28 words.",
     "animate": (
-        "Character animation prompt. One character, one clear action, one emotional beat. "
-        "Stay close to the slug. Under 35 words."
+        "Character animation. One character, one action, one emotional beat. Under 22 words."
     ),
 }
 
@@ -241,9 +239,9 @@ def _llm_polish(slug: str, prompt_type: str, timeout: int = 45) -> str | None:
             {"role": "system", "content": _POLISH_SYSTEM},
             {"role": "user", "content": f"{_TYPE_HINT[prompt_type]}\n\nSlug: {slug}"},
         ],
-        "max_tokens": 120,
-        "temperature": 0.85,
-        "top_p": 0.92,
+        "max_tokens": 80,
+        "temperature": 0.70,
+        "top_p": 0.90,
     }).encode()
 
     req = urllib.request.Request(

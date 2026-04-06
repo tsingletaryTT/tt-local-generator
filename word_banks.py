@@ -894,6 +894,7 @@ CINEMATIC_DIRECTORS = [
     "Orson Welles — deep focus, low angle, expressionist shadow",
     "John Huston — adventure and moral complexity, wide weathered faces",
     "Coppola — operatic family tragedy, amber candlelight",
+    "Spielberg — golden-hour backlit silhouette, kinetic wonder, child's-eye rack-focus reveal",
     "Scorsese — kinetic guilt, Catholic imagery, freeze-frame",
     "Malick — grass, whispered voiceover, light through trees",
     "Lynch — uncanny suburban dread, velvet curtain, distorted sound",
@@ -905,6 +906,9 @@ CINEMATIC_DIRECTORS = [
     "Jarmusch — deadpan cool, black and white, coffee and cigarettes",
     "Van Sant — dreamlike youth, Satie-paced drift",
     "Sofia Coppola — luxury melancholy, feminine interior silence",
+    "Penny Marshall — warm ensemble Americana, naturalistic ensemble blocking, working-class tenderness",
+    "Roger Corman — garish B-movie color, Gothic camp excess, drive-in spectacle on a shoestring",
+    "Mel Brooks — vaudevillian sight gag, wide parody staging, anachronistic wink at the camera",
     # Contemporary / global
     "Haneke — long take, violence withheld, clinical Austrian interior",
     "von Trier — Dogme rawness, handheld, washed-out palette",
