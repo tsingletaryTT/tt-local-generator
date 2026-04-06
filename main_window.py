@@ -3586,21 +3586,51 @@ class _StatusBar(Gtk.Box):
         except (TypeError, ValueError):
             return 0.0
 
+    # Shade blocks ordered light → full: ░ ▒ ▓ █  (CP437 176–178, 219)
+    _SHADE = ["░", "▒", "▓", "█"]
+
+    @staticmethod
+    def _clock_to_shade(clock: int, max_clock: int) -> str:
+        """Map one chip's aiclk to a shade block relative to the fleet maximum."""
+        if max_clock <= 0:
+            return "░"
+        ratio = clock / max_clock
+        if ratio >= 0.85:
+            return "█"
+        if ratio >= 0.55:
+            return "▓"
+        if ratio >= 0.25:
+            return "▒"
+        return "░"
+
     def _read_chip_telemetry(self) -> str:
         """Return a compact chip summary string for the status bar.
 
-        Always reads clock from sysfs (passive, no subprocess).
-        Adds temperature and power from tt-smi snapshot when tt-smi >= 4.1
-        is available.  Falls back gracefully at each layer.
+        Format (example with 4 chips):
+          61°C  196W  1350 MHz  █▓█▓
+
+        Temp is the average across all chips.  The shade blocks show per-chip
+        activity (aiclk relative to the highest clock in the group):
+          ░ idle / very low   ▒ low-medium   ▓ medium-high   █ near peak
+
+        Always reads clocks from sysfs (passive, no subprocess).
+        Adds avg temperature and total power from tt-smi when tt-smi >= 4.1.
+        Falls back gracefully at each layer.
         """
         parts: list[str] = []
 
-        # ── Layer 1: sysfs clocks (always) ────────────────────────────────────
+        # ── Layer 1: sysfs clocks — shade blocks + peak clock ─────────────────
         clocks = self._read_sysfs_clocks()
         if clocks:
-            parts.append(f"{max(clocks)} MHz")
+            max_clk = max(clocks)
+            blocks = "".join(self._clock_to_shade(c, max_clk) for c in clocks)
+            parts.append(f"{max_clk} MHz")
+            # blocks go at the end so they don't crowd the numbers
+            shade_str = blocks   # held separately, appended last
+        else:
+            shade_str = ""
 
-        # ── Layer 2: tt-smi temp + power (when available) ─────────────────────
+        # ── Layer 2: tt-smi avg temp + total power (when available) ───────────
         tt_smi = self._resolve_tt_smi()
         if tt_smi:
             try:
@@ -3617,13 +3647,18 @@ class _StatusBar(Gtk.Box):
                                   for c in chips]
                         powers = [self._f(c.get("telemetry", {}).get("power"))
                                   for c in chips]
-                        if any(t > 0 for t in temps):
-                            parts.insert(0, f"{max(temps):.0f}°C")
+                        valid_temps = [t for t in temps if t > 0]
+                        if valid_temps:
+                            avg_t = sum(valid_temps) / len(valid_temps)
+                            parts.insert(0, f"{avg_t:.0f}°C")
                         if any(p > 0 for p in powers):
-                            parts.insert(1 if parts and "°C" in parts[0] else 0,
-                                         f"{sum(powers):.0f}W")
+                            idx = 1 if parts and "°C" in parts[0] else 0
+                            parts.insert(idx, f"{sum(powers):.0f}W")
             except Exception:
-                pass  # tt-smi failed this poll — show clock-only from sysfs
+                pass  # tt-smi failed this poll — show clock + blocks from sysfs
+
+        if shade_str:
+            parts.append(shade_str)
 
         return "  ".join(parts)
 
