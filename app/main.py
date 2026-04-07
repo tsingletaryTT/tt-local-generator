@@ -80,17 +80,22 @@ def main():
         quit_action.connect("activate", lambda *_: application.quit())
         application.add_action(quit_action)
 
-        win = MainWindow(app=application, server_url=args.server)
-        # Set window icon from bundled asset; fall back gracefully if missing.
+        # Register the bundled assets/ directory as an icon search path so
+        # the Tenstorrent icon is found by name on every window — including
+        # secondary windows (Attractor, fullscreen player) — without requiring
+        # setup_ubuntu.sh to have installed the icon into the XDG icon cache.
         if _ICON_PATH.exists():
             try:
-                pixbuf = GdkPixbuf.Pixbuf.new_from_file(str(_ICON_PATH))
-                win.set_icon_name("ai.tenstorrent.tt-video-gen")  # XDG name
-                # GTK4 uses the application icon; set it via the display's
-                # default icon list as a pixbuf fallback.
-                Gtk.Window.set_default_icon_name("ai.tenstorrent.tt-video-gen")
+                from gi.repository import Gdk
+                display = Gdk.Display.get_default()
+                if display:
+                    theme = Gtk.IconTheme.get_for_display(display)
+                    theme.add_search_path(str(_ICON_PATH.parent))
             except Exception:
                 pass
+        Gtk.Window.set_default_icon_name("ai.tenstorrent.tt-video-gen")
+
+        win = MainWindow(app=application, server_url=args.server)
         win.present()
 
     app.connect("activate", on_activate)
