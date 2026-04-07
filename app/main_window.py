@@ -2637,6 +2637,10 @@ class ControlPanel(Gtk.Box):
         """Build the Servers ▾ popover with one row per managed service."""
         popover = Gtk.Popover()
         popover.set_has_arrow(False)
+        # Keep the popover open after button clicks so the ◌ busy state and
+        # green dot updates are visible while the server starts.  The user
+        # dismisses it by clicking outside or pressing Escape.
+        popover.set_autohide(False)
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         outer.set_margin_top(8)

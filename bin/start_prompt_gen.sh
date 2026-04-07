@@ -100,7 +100,12 @@ echo "  Port:   $PORT"
 echo "  Log:    $LOG_FILE"
 echo ""
 
-python3 "$REPO_ROOT/app/prompt_server.py" \
+# Use the tenstorrent venv python which has torch/transformers; fall back to
+# system python3 if the venv is not present.
+PYTHON3="${HOME}/.tenstorrent-venv/bin/python3"
+[[ -x "$PYTHON3" ]] || PYTHON3="python3"
+
+"$PYTHON3" "$REPO_ROOT/app/prompt_server.py" \
     --model "$MODEL" \
     --port "$PORT" \
     --host 127.0.0.1 \
