@@ -93,6 +93,7 @@ entry, textview, spinbutton {
     border: 1px solid @tt_border;
     border-radius: 4px;
     padding: 4px;
+    font-size: 12px;
 }
 entry:focus, textview:focus, spinbutton:focus {
     border-color: @tt_accent;
@@ -993,6 +994,7 @@ class _QueueItem:
     animate_mode: str = "animation" # "animation" or "replacement"
     model_id: str = ""               # specific model within the category, e.g. "wan2", "mochi", "flux"
     job_id_override: str = ""        # non-empty → recovery item; skip submission, poll this job ID directly
+    from_attractor: bool = False     # True → enqueued by TT-TV auto-gen; purged on attractor close
 
 
 # ── Generation card ────────────────────────────────────────────────────────────
@@ -5815,8 +5817,20 @@ class MainWindow(Gtk.ApplicationWindow):
         GLib.idle_add(win.start)
 
     def _on_attractor_closed(self, _win) -> None:
-        """Called when the attractor window is destroyed."""
+        """Called when the attractor window is destroyed.
+
+        Purges any auto-generated TT-TV jobs still waiting in the queue so
+        they don't continue running after the user has closed TT-TV.
+        User-typed prompts (from_attractor=False) are preserved.
+        """
         self._attractor_win = None
+        before = len(self._queue)
+        self._queue = [item for item in self._queue if not item.from_attractor]
+        purged = before - len(self._queue)
+        if purged:
+            self._persist_queue()
+            self._update_queue_display()
+            self._set_status(f"TT-TV closed — {purged} queued auto-gen job{'s' if purged != 1 else ''} cancelled")
 
     def _on_attractor_priority_enqueue(self, prompt, neg="", steps=30, seed=-1,
                                         seed_image_path="", model_source="video",
@@ -5847,20 +5861,26 @@ class MainWindow(Gtk.ApplicationWindow):
                                 ref_video_path="", ref_char_path="",
                                 animate_mode="animation", model_id="") -> None:
         """
-        Called by AttractorWindow when it wants to enqueue a new generation.
+        Called by AttractorWindow when it wants to enqueue a new auto-generation.
 
-        Starts the generation immediately if the worker is idle; parks it in
-        the queue if a generation is already running.  This prevents prompts
-        from accumulating unprocessed when attractor mode is the first thing
-        started (before any manual generation has been triggered).
+        Starts the generation immediately if the worker is idle; otherwise parks
+        it in the queue tagged as from_attractor=True so it is purged if TT-TV
+        is closed before the job runs.
         """
-        args = (prompt, neg, steps, seed, seed_image_path,
-                model_source, guidance_scale, ref_video_path,
-                ref_char_path, animate_mode, model_id)
+        if not self._check_disk_space():
+            return
         if self._worker and self._worker.is_alive():
-            self._on_enqueue(*args)
+            item = _QueueItem(prompt, neg, steps, seed, seed_image_path,
+                              model_source, guidance_scale,
+                              ref_video_path, ref_char_path, animate_mode,
+                              model_id, from_attractor=True)
+            self._queue.append(item)
+            self._persist_queue()
+            self._update_queue_display()
         else:
-            self._on_generate(*args)
+            self._on_generate(prompt, neg, steps, seed, seed_image_path,
+                              model_source, guidance_scale, ref_video_path,
+                              ref_char_path, animate_mode, model_id)
 
     def _update_attractor_btn(self) -> None:
         """Enable/disable the Attractor button based on whether any media exists."""

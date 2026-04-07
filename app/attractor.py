@@ -216,7 +216,7 @@ _CSS = b"""
     background-color: @tt_bg_darkest;
     border-right: 1px solid @tt_border;
     padding: 6px 4px;
-    min-width: 84px;
+    min-width: 72px;
 }
 .attractor-header {
     color: @tt_accent;
@@ -240,7 +240,7 @@ _CSS = b"""
     border-radius: 6px;
     padding: 5px 6px;
     margin-bottom: 3px;
-    min-height: 52px;   /* tag(12) + gap(2) + 2-line-prompt(28) + v-padding(10) */
+    min-height: 54px;   /* tag(12) + gap(2) + 2-line-prompt(30) + v-padding(10) */
 }
 .cs-card-generating {
     background-color: @tt_bg_dark;
@@ -248,7 +248,7 @@ _CSS = b"""
     border-radius: 6px;
     padding: 5px 6px;
     margin-bottom: 3px;
-    min-height: 52px;   /* must match .cs-card exactly - prevents height shift on swap */
+    min-height: 54px;   /* must match .cs-card exactly - prevents height shift on swap */
 }
 .cs-card-tag {
     color: @tt_text_muted;
@@ -264,15 +264,15 @@ _CSS = b"""
 }
 .cs-card-prompt {
     color: @tt_text;
-    font-size: 9px;
+    font-size: 10px;
     font-style: italic;
-    min-height: 28px;   /* 2 lines x 14px - keeps card height stable when text arrives */
+    min-height: 30px;   /* 2 lines x 15px - keeps card height stable when text arrives */
 }
 .cs-card-empty {
     color: @tt_text_muted;
-    font-size: 9px;
+    font-size: 10px;
     font-style: italic;
-    min-height: 28px;   /* must match .cs-card-prompt */
+    min-height: 30px;   /* must match .cs-card-prompt */
 }
 /* "Next on TT-TV" card */
 .next-card {
@@ -576,7 +576,7 @@ class AttractorWindow(Gtk.Window):
         # ── Sidebar ───────────────────────────────────────────────────────
         sidebar = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         sidebar.add_css_class("attractor-sidebar")
-        sidebar.set_size_request(84, -1)
+        sidebar.set_size_request(72, -1)
         sidebar.set_hexpand(False)
         sidebar.set_vexpand(True)
 
