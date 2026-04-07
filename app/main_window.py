@@ -2767,12 +2767,14 @@ class ControlPanel(Gtk.Box):
         up to 90 s for the server to become healthy before re-enabling them.
         On stop the dot is refreshed once after the script exits.
         """
-        # Immediate visual feedback — disable the row while the action runs.
-        GLib.idle_add(self._set_server_row_busy, key, True)
-        # Update the dot to a neutral "working" state.
+        # Already on the main thread — call directly for immediate visual feedback
+        # before the worker thread is even spawned.  Using idle_add here would
+        # defer the update until the next idle cycle, by which time the user may
+        # have already closed the popover and seen no reaction.
+        self._set_server_row_busy(key, True)
         dot = self._servers_popover_dots.get(key)
         if dot:
-            GLib.idle_add(dot.set_label, "◌")
+            dot.set_label("◌")
 
         def _worker():
             try:
