@@ -1389,16 +1389,18 @@ class AttractorWindow(Gtk.Window):
             return
         if getattr(record, "media_type", "video") == "image":
             return  # images excluded from attractor playback
-        # If a playlist channel is active, only accept records that belong to it.
-        # New generations will show up in "All Videos" mode but not in a specific
-        # channel unless the user explicitly added them to that playlist.
+        # If a playlist channel is active, auto-enroll newly generated records
+        # into that playlist so the channel grows as TT-TV generates content.
+        # Videos generated while watching "Space Adventures" should become part
+        # of "Space Adventures" — that's the expected behaviour.
         if self._playlist_id is not None:
             from playlist_store import playlist_store as _ps
+            record_id = getattr(record, "id", None)
             pl = _ps.get(self._playlist_id)
-            if pl is None or getattr(record, "id", None) not in pl.record_ids:
-                _log.debug("add_record: skipping %s — not in active playlist %s",
-                           getattr(record, "id", "?"), self._playlist_id)
-                return
+            if pl is not None and record_id and record_id not in pl.record_ids:
+                _ps.add_records(self._playlist_id, [record_id])
+                _log.info("add_record: auto-enrolled %s into active playlist %s",
+                          record_id, self._playlist_id)
         # Keep all_records up-to-date for potential _switch_channel() calls.
         self._all_records.append(record)
         path = getattr(record, "video_path", None) or ""

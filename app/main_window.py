@@ -437,16 +437,17 @@ scrollbar slider:hover {
 /* -- Servers toolbar button + popover -------------------------------------- */
 .servers-menu-btn {
     background: transparent;
-    border: 1px solid @tt_border;
+    border: none;
+    box-shadow: none;
     border-radius: 4px;
     color: @tt_text_secondary;
     font-size: 10px;
-    padding: 2px 7px;
-    margin-left: 4px;
+    padding: 2px 6px;
+    margin-left: 2px;
+    min-width: 0;
 }
 .servers-menu-btn:hover {
     background: rgba(79, 209, 197, 0.12);
-    border-color: @tt_accent;
     color: @tt_accent;
 }
 .servers-popover-row {
@@ -741,7 +742,7 @@ menubar > item:selected {
 }
 /* -- Playlists popover -------------------------------------------------------- */
 .playlists-popover-row {
-    padding: 4px 2px;
+    padding: 5px 2px;
 }
 .playlists-popover-name {
     font-size: 11px;
@@ -752,21 +753,89 @@ menubar > item:selected {
 .playlists-popover-count {
     font-size: 10px;
     color: @tt_text_muted;
+    margin-top: 1px;
+}
+/* "+ New" header button - accent tinted so it reads as a create action */
+.playlists-new-btn {
+    background: alpha(@tt_accent, 0.10);
+    border: 1px solid alpha(@tt_accent, 0.35);
+    border-radius: 4px;
+    color: @tt_accent;
+    font-size: 10px;
+    padding: 2px 10px;
+}
+.playlists-new-btn:hover {
+    background: alpha(@tt_accent, 0.20);
+    border-color: @tt_accent;
+}
+/* Destructive delete button in playlist rows */
+.playlists-del-btn {
+    background: transparent;
+    border: 1px solid @tt_border;
+    border-radius: 3px;
+    color: @tt_text_muted;
+    font-size: 10px;
+    padding: 1px 6px;
+    min-width: 28px;
+}
+.playlists-del-btn:hover {
+    background: rgba(255, 107, 107, 0.10);
+    border-color: #FF6B6B;
+    color: #FF6B6B;
 }
 /* -- Selection mode banner ---------------------------------------------------- */
 .selection-banner {
-    background-color: alpha(#4FD1C5, 0.08);
-    border-bottom: 1px solid alpha(#4FD1C5, 0.35);
-    padding: 5px 12px;
+    background-color: alpha(@tt_accent, 0.07);
+    border-bottom: 1px solid alpha(@tt_accent, 0.30);
+    padding: 6px 14px;
 }
 .selection-banner-label {
     font-size: 12px;
     color: @tt_accent;
     font-weight: bold;
 }
+/* Primary "Add Selected" button - matches the banner's weight */
+.selection-add-btn {
+    background: alpha(@tt_accent, 0.14);
+    border: 1px solid alpha(@tt_accent, 0.50);
+    border-radius: 4px;
+    color: @tt_accent;
+    font-size: 12px;
+    font-weight: bold;
+    padding: 4px 16px;
+    min-width: 0;
+}
+.selection-add-btn:hover {
+    background: alpha(@tt_accent, 0.24);
+    border-color: @tt_accent;
+}
+/* Cancel button in the selection banner */
+.selection-cancel-btn {
+    background: transparent;
+    border: 1px solid @tt_border;
+    border-radius: 4px;
+    color: @tt_text_secondary;
+    font-size: 12px;
+    padding: 4px 12px;
+    min-width: 0;
+}
+.selection-cancel-btn:hover {
+    background: rgba(255, 107, 107, 0.08);
+    border-color: #FF6B6B;
+    color: #FF6B6B;
+}
 /* -- Card checkbox overlay ---------------------------------------------------- */
+/* Semi-opaque pill behind the checkbox so it reads against any card image */
 .card-check {
-    margin: 4px;
+    margin: 6px;
+    background: rgba(15, 42, 53, 0.72);
+    border-radius: 4px;
+    padding: 2px 3px;
+}
+/* Detail-panel playlist checkboxes */
+.detail-playlist-check {
+    font-size: 11px;
+    color: @tt_text;
 }
 """
 
@@ -1454,6 +1523,34 @@ class DetailPanel(Gtk.ScrolledWindow):
             seed_img = _make_image_widget(record.seed_image_path, 96, 54)
             seed_img.set_halign(Gtk.Align.START)
             content.append(seed_img)
+
+        # ── Playlists membership ──────────────────────────────────────────────
+        # Show every playlist as a checkbox. Checking/unchecking adds or removes
+        # this record from the playlist immediately, without any extra Save step.
+        from playlist_store import playlist_store as _ps
+        all_playlists = _ps.all()
+        if all_playlists:
+            content.append(self._detail_section("Playlists"))
+            pl_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=3)
+            pl_box.set_margin_top(2)
+            pl_box.set_margin_bottom(2)
+            for pl in all_playlists:
+                cb = Gtk.CheckButton(label=pl.name)
+                cb.add_css_class("detail-playlist-check")
+                cb.set_active(pl.contains(record.id))
+                cb.set_tooltip_text(
+                    f"Remove from \"{pl.name}\"" if pl.contains(record.id)
+                    else f"Add to \"{pl.name}\""
+                )
+                def _on_pl_toggled(check, pid=pl.id, rid=record.id):
+                    from playlist_store import playlist_store as _ps2
+                    if check.get_active():
+                        _ps2.add_records(pid, [rid])
+                    else:
+                        _ps2.remove_record(pid, rid)
+                cb.connect("toggled", _on_pl_toggled)
+                pl_box.append(cb)
+            content.append(pl_box)
 
         # ── Action buttons ────────────────────────────────────────────────────
         sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
@@ -2200,8 +2297,9 @@ class ControlPanel(Gtk.Box):
         self._toolbar_box.append(_tb_spacer)
 
         # ── Servers menu button ───────────────────────────────────────────────
-        self._servers_btn = Gtk.MenuButton(label="Servers ▾")
+        self._servers_btn = Gtk.MenuButton(label="Servers")
         self._servers_btn.add_css_class("servers-menu-btn")
+        self._servers_btn.set_hexpand(False)
         self._servers_btn.set_tooltip_text(
             "Start, stop, or restart managed services\n"
             "(Wan2.2, Mochi, FLUX, Animate, Prompt Generator)"
@@ -2213,8 +2311,9 @@ class ControlPanel(Gtk.Box):
         self._toolbar_box.append(self._servers_btn)
 
         # ── Playlists menu button ─────────────────────────────────────────────
-        self._playlists_btn = Gtk.MenuButton(label="Playlists ▾")
+        self._playlists_btn = Gtk.MenuButton(label="Playlists")
         self._playlists_btn.add_css_class("servers-menu-btn")
+        self._playlists_btn.set_hexpand(False)
         self._playlists_btn.set_tooltip_text("Manage playlists / TT-TV channels")
         self._playlists_popover = self._build_playlists_popover()
         self._playlists_btn.set_popover(self._playlists_popover)
@@ -2938,7 +3037,7 @@ class ControlPanel(Gtk.Box):
         hdr_lbl.set_xalign(0)
         hdr.append(hdr_lbl)
         new_btn = Gtk.Button(label="+ New")
-        new_btn.add_css_class("servers-popover-btn")
+        new_btn.add_css_class("playlists-new-btn")
         new_btn.set_tooltip_text("Create a new playlist")
         new_btn.connect("clicked", self._on_playlist_new_clicked)
         hdr.append(new_btn)
@@ -3042,7 +3141,7 @@ class ControlPanel(Gtk.Box):
 
             # Delete button
             del_btn = Gtk.Button(label="🗑")
-            del_btn.add_css_class("servers-popover-btn")
+            del_btn.add_css_class("playlists-del-btn")
             del_btn.set_tooltip_text(f"Delete playlist '{pl.name}'")
             del_btn.connect("clicked", lambda _b, pid=pl.id, pname=pl.name:
                             self._on_playlist_delete_clicked(pid, pname))
@@ -4944,12 +5043,12 @@ class MainWindow(Gtk.ApplicationWindow):
         banner_box.append(self._selection_banner_lbl)
 
         self._selection_add_btn = Gtk.Button(label="Add Selected")
-        self._selection_add_btn.add_css_class("servers-popover-btn")
+        self._selection_add_btn.add_css_class("selection-add-btn")
         self._selection_add_btn.connect("clicked", self._on_selection_add)
         banner_box.append(self._selection_add_btn)
 
         cancel_btn = Gtk.Button(label="✕ Cancel")
-        cancel_btn.add_css_class("servers-popover-btn")
+        cancel_btn.add_css_class("selection-cancel-btn")
         cancel_btn.connect("clicked", lambda _: self._exit_selection_mode())
         banner_box.append(cancel_btn)
 
