@@ -19,6 +19,7 @@ Classes:
     MainWindow       — top-level Gtk.ApplicationWindow
 """
 import json
+import os
 import shutil
 import subprocess
 import sys
