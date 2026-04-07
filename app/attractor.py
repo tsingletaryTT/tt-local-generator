@@ -894,14 +894,18 @@ class AttractorWindow(Gtk.Window):
         if not self._alive or self._paused:
             return
 
-        # Cancel any already-scheduled slot unload.  If _advance fires before the
-        # unload timer fires, execute the unload eagerly so we don't skip it.
+        # Cancel any pending unload timer.  Do NOT call _unload_slot_video eagerly
+        # here even if the timer hasn't fired yet.  The slot we're about to load
+        # into is the same one the timer would have unloaded — calling set_file(None)
+        # right before set_filename() puts two GStreamer pipelines in flight on the
+        # same slot simultaneously: the async PLAYING→NULL teardown of the old one
+        # races with the new pipeline initialising, producing "assertion 'set != NULL'
+        # failed" bursts and accumulating file descriptors (→ EMFILE crash).
+        # GTK's set_filename() handles replacing an in-flight file safely on its own.
         if self._pending_unload_source:
             GLib.source_remove(self._pending_unload_source)
             self._pending_unload_source = 0
-        if self._slot_to_unload is not None:
-            _unload_slot_video(self._slot_to_unload)
-            self._slot_to_unload = None
+        self._slot_to_unload = None
 
         self._pool.advance()
         record = self._pool.current_record()
@@ -919,14 +923,13 @@ class AttractorWindow(Gtk.Window):
         self._active_slot_name = next_name
 
         # Schedule the now-invisible slot's pipeline teardown.
-        # We use a fixed 500 ms delay regardless of the stack transition duration
-        # (which is 0 for the instant channel-change cut).  GStreamer needs time
-        # to walk its PLAYING→PAUSED→NULL state machine and actually close file
-        # descriptors — 50 ms (the old value) is too short; pipelines stack up
-        # faster than they release FDs, exhausting the 1024-fd process limit.
+        # 1500 ms gives GStreamer enough time to walk PLAYING→PAUSED→NULL and
+        # fully release its file descriptors before the next advance touches
+        # this slot again.  The slot is invisible during this window so there
+        # is no visual cost to the delay.
         self._slot_to_unload = prev_slot
         self._pending_unload_source = GLib.timeout_add(
-            500,
+            1500,
             self._on_unload_timer,
         )
 
