@@ -10,18 +10,19 @@ set -euo pipefail
 TT_CTL="/usr/lib/tt-local-generator/tt-ctl"
 
 case "$1" in
-    remove|upgrade|deconfigure)
-        # Stop all managed services gracefully if tt-ctl is present.
+    remove|deconfigure)
+        # Stop all managed services gracefully only on actual removal.
+        # Skipped during upgrade so a running inference server is not killed
+        # just because the user is reinstalling or updating the package.
         if [[ -x "$TT_CTL" ]]; then
             echo "tt-local-generator: stopping managed services…"
-            # --quiet: don't error if services are already stopped.
             "$TT_CTL" stop all 2>/dev/null || true
             "$TT_CTL" stop prompt-server 2>/dev/null || true
             echo "tt-local-generator: services stopped."
         fi
         ;;
-    failed-upgrade)
-        # Nothing to do on a failed upgrade rollback.
+    upgrade|failed-upgrade)
+        # Nothing to do — leave inference servers running across upgrades.
         ;;
     *)
         # Unexpected argument — do nothing rather than fail.

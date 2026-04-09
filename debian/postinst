@@ -155,6 +155,11 @@ echo "HF_HOME and HF_HUB_CACHE are exported system-wide via:"
 echo "  /etc/profile.d/tt-local-generator.sh"
 echo "(Re-login or 'source /etc/profile.d/tt-local-generator.sh' to activate)"
 
+# Make the vendor workflow_logs directories world-writable so any user can
+# create log files there when the server start scripts run as a normal user.
+# These are ephemeral runtime logs, not security-sensitive data.
+chmod -R a+w "$INSTALL_DIR/vendor/tt-inference-server/workflow_logs" 2>/dev/null || true
+
 # =============================================================================
 # STEP 3 — Add real user to docker group
 # =============================================================================
