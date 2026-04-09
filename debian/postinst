@@ -109,14 +109,43 @@ if getent group docker &>/dev/null; then
     _MODEL_GROUP="docker"
 fi
 
-for _dir in \
-    "$OPT_MODELS" \
-    "$OPT_MODELS/hub" \
-    "$OPT_MODELS/tt-weights"
-do
+for _dir in "$OPT_MODELS" "$OPT_MODELS/tt-weights"; do
     install -d -m 2775 "$_dir"
     chown root:"$_MODEL_GROUP" "$_dir"
 done
+
+# hub/ — symlink to the real user's existing HF cache if one is already
+# populated, so the profile.d redirect doesn't make existing models invisible.
+# On a fresh machine with no prior HF cache, create an empty directory.
+_EXISTING_HUB=""
+if [[ -n "$REAL_USER" ]]; then
+    _EXISTING_HUB="/home/$REAL_USER/.cache/huggingface/hub"
+fi
+
+if [[ -n "$_EXISTING_HUB" && -d "$_EXISTING_HUB" ]]; then
+    if [[ -L "$OPT_MODELS/hub" ]]; then
+        # Already a symlink (upgrade path) — leave it alone.
+        echo "hub/ → $(readlink "$OPT_MODELS/hub") (symlink already present)"
+    elif [[ ! -e "$OPT_MODELS/hub" ]]; then
+        # Fresh install — hub/ doesn't exist yet; symlink to the existing cache.
+        ln -s "$_EXISTING_HUB" "$OPT_MODELS/hub"
+        echo "hub/ → $_EXISTING_HUB (symlinked to existing HF cache)"
+    elif [[ -d "$OPT_MODELS/hub" && -z "$(ls -A "$OPT_MODELS/hub")" ]]; then
+        # Empty directory left over from a previous failed install — replace.
+        rmdir "$OPT_MODELS/hub"
+        ln -s "$_EXISTING_HUB" "$OPT_MODELS/hub"
+        echo "hub/ → $_EXISTING_HUB (replaced empty dir with symlink)"
+    else
+        # hub/ exists and has content — don't touch it; just inform.
+        echo "hub/ already populated — leaving as-is."
+        echo "NOTE: Your existing HF cache at $_EXISTING_HUB is separate."
+        echo "  To unify: sudo rm -rf $OPT_MODELS/hub && sudo ln -s $_EXISTING_HUB $OPT_MODELS/hub"
+    fi
+else
+    install -d -m 2775 "$OPT_MODELS/hub"
+    chown root:"$_MODEL_GROUP" "$OPT_MODELS/hub"
+    echo "hub/ created (no existing HF cache found for ${REAL_USER:-root})"
+fi
 
 echo "Model storage ready: $OPT_MODELS (group $_MODEL_GROUP, mode 2775)"
 echo "  hub/        ← HuggingFace model blobs  (HF_HUB_CACHE)"
