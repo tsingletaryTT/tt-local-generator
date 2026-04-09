@@ -67,6 +67,11 @@ override_dh_install:
 	    app/assets/tenstorrent.png \
 	    debian/tt-local-generator/usr/share/icons/hicolor/32x32/apps/ai.tenstorrent.tt-video-gen.png
 
+	# ── profile.d — system-wide HF_HOME / HF_HUB_CACHE ──────────────────
+	install -d debian/tt-local-generator/etc/profile.d
+	install -m 644 debian/tt-local-generator.sh \
+	    debian/tt-local-generator/etc/profile.d/tt-local-generator.sh
+
 	# ── Docs ──────────────────────────────────────────────────────────────
 	install -m 644 README.md GUIDE.md \
 	    debian/tt-local-generator/usr/share/doc/tt-local-generator/

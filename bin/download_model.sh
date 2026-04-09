@@ -14,17 +14,24 @@
 #   --skip-if-exists      Exit 0 silently if model dir already present in HF cache
 #   --check-only          Exit 0 if present, exit 1 if not — no download attempted
 #
+# Cache location (in priority order):
+#   1. $HF_HUB_CACHE if set
+#   2. $HF_HOME/hub  if HF_HOME is set
+#   3. /opt/tenstorrent/models/hub  (default; set system-wide by profile.d)
+#   4. ~/.cache/huggingface/hub     (legacy fallback when /opt path absent)
+#
 # Token search order (when --token is not supplied):
 #   1. $HF_TOKEN env var
 #   2. $HUGGING_FACE_HUB_TOKEN env var
-#   3. ${HF_HOME:-~/.cache/huggingface}/token  (written by huggingface-cli login)
-#   4. ~/.huggingface/token                    (legacy location)
-#   5. /etc/tt-generator/hf_token             (admin-staged / CI path)
+#   3. $HF_HOME/token or /opt/tenstorrent/models/token (shared system token)
+#   4. ~/.huggingface/token  (legacy location)
+#   5. /etc/tt-generator/hf_token  (admin-staged / CI path)
 #
-# huggingface-cli discovery order:
-#   1. ~/.tenstorrent-venv/bin/huggingface-cli (tt-installer venv)
-#   2. system huggingface-cli on $PATH
-#   3. pip-install huggingface_hub[cli] into system Python3 and retry
+# HuggingFace CLI discovery order:
+#   1. ~/.tenstorrent-venv/bin/hf  (tt-installer venv)
+#   2. system `hf` or `huggingface-cli` on $PATH
+#   3. /usr/local/bin/hf  (pip install target, may not be on PATH in postinst)
+#   4. pip-install huggingface_hub into system Python3 and retry
 
 set -euo pipefail
 
@@ -59,16 +66,28 @@ if [[ -z "$REPO" ]]; then
     exit 1
 fi
 
-# ── Resolve HF cache root ──────────────────────────────────────────────────────
-# Honour $HF_HOME if set; otherwise fall back to ~/.cache/huggingface.
-HF_CACHE="${HF_HOME:-${HOME:-/root}/.cache/huggingface}"
+# ── Resolve HF hub cache directory ────────────────────────────────────────────
+# Priority: explicit env var → HF_HOME/hub → shared /opt path → legacy ~/.cache
+# /etc/profile.d/tt-local-generator.sh exports both HF_HOME and HF_HUB_CACHE
+# for interactive sessions, but profile.d is not sourced in postinst contexts,
+# so we derive the path explicitly here instead of relying on the env.
+_OPT_HUB="/opt/tenstorrent/models/hub"
+if [[ -n "${HF_HUB_CACHE:-}" ]]; then
+    HF_HUB_CACHE_DIR="$HF_HUB_CACHE"
+elif [[ -n "${HF_HOME:-}" ]]; then
+    HF_HUB_CACHE_DIR="$HF_HOME/hub"
+elif [[ -d "$_OPT_HUB" ]]; then
+    HF_HUB_CACHE_DIR="$_OPT_HUB"
+else
+    HF_HUB_CACHE_DIR="${HOME:-/root}/.cache/huggingface/hub"
+fi
 
-# Convert "org/model" → "models--org--model" (HF cache convention).
+# Convert "org/model" → "models--org--model" (HF cache directory convention).
 _cache_slug() {
     echo "models--$(echo "$1" | tr '/' '--')"
 }
 
-MODEL_CACHE_DIR="$HF_CACHE/hub/$(_cache_slug "$REPO")"
+MODEL_CACHE_DIR="$HF_HUB_CACHE_DIR/$(_cache_slug "$REPO")"
 
 # ── --check-only / --skip-if-exists fast path ─────────────────────────────────
 if [[ -d "$MODEL_CACHE_DIR" ]]; then
@@ -95,7 +114,8 @@ if [[ -z "$TOKEN" ]]; then
     else
         # Check well-known token file locations.
         for _tok_file in \
-            "${HF_HOME:-${HOME:-/root}/.cache/huggingface}/token" \
+            "/opt/tenstorrent/models/token" \
+            "${HF_HOME:-}/token" \
             "${HOME:-/root}/.huggingface/token" \
             "/etc/tt-generator/hf_token"
         do
@@ -165,8 +185,10 @@ echo "Cache target:      $MODEL_CACHE_DIR"
 [[ -n "$TOKEN" ]] && echo "Auth:              HF token provided"
 echo ""
 
-# Build the download command; add --token only when we have one.
-DOWNLOAD_CMD=("$HF_CLI" download "$REPO")
+# Build the download command.
+# --cache-dir is passed explicitly so the correct path is used even when
+# HF_HUB_CACHE is not exported in the current environment (e.g. postinst).
+DOWNLOAD_CMD=("$HF_CLI" download "$REPO" --cache-dir "$HF_HUB_CACHE_DIR")
 if [[ -n "$TOKEN" ]]; then
     DOWNLOAD_CMD+=(--token "$TOKEN")
 fi
