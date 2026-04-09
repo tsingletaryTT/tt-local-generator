@@ -120,39 +120,64 @@ cd ~/code/tt-local-generator
 
 ## Features
 
-### Generation
-- **Video** — text-to-video with Wan2.2 or Mochi-1
-- **Image** — text-to-image with FLUX.1-dev
-- **Animate** — drive a character image with a motion video (Wan2.2-Animate-14B)
-- **Seed image** — attach a reference image to guide Wan2.2's motion and composition
-- **Style chips** — one-click prompt modifiers (camera moves, lighting, style, quality)
-- **Prompt queue** — write the next prompt while a generation is running
-- **Queue persistence** — queue survives crashes and restarts
-- **Disk space guard** — generation is blocked when the output drive has < 18 GB free
+### Generating
 
-### Prompt generator
-- **✨ Inspire me** — always works: three-tier system (algorithmic → Markov → LLM polish)
-- **Algo-only** mode when the Qwen server is offline — still generates varied prompts
-- **LLM polish** when `start_prompt_gen.sh` is running (Qwen3-0.6B on CPU, port 8001)
-- **Seed-text inspire** — type a rough idea, click Inspire; LLM polishes if available
+- **Text-to-video with Wan2.2** — 5-second 720p clips from a text prompt. The server warms in
+  under 5 minutes on QB2 after the first cold load; browse your existing gallery while it
+  starts — no idle waiting before you get value.
+- **Text-to-image with FLUX.1-dev** — high-quality still images on the same hardware.
+- **Animate** — bring any character image to life: supply a motion video and a character PNG,
+  and Wan2.2-Animate-14B drives the character through the motion pattern.
+- **Seed image** — attach a reference photo or frame to guide color palette, composition, and
+  style continuity between clips.
+- **Prompt queue** — write the next prompt while a generation runs; the queue drains
+  automatically so the GPU stays busy. Survives crashes and restarts.
+- **Disk space guard** — generation pauses automatically when free space drops below 18 GB.
 
-### Gallery & playback
-- **Responsive gallery** — card grid re-flows automatically as the window resizes
-- **Inline video player** — hover to preview; click for full detail panel
-- **Full-size player** — F for fullscreen, Space to play/pause, Esc to close
-- **Trash / delete** — 🗑 removes a generation from history and deletes files
-- **Iterate** — ↺ re-populates the prompt panel from any past generation
+### Writing prompts
 
-### Attractor Mode
-- **✦ Attractor** toolbar button opens a borderless kiosk window
-- Loops through gallery media with crossfades
-- Continuously generates and queues new generations in the background
+- **✨ Inspire me** — one click to a polished, varied prompt every time. Three-tier system:
+  algorithmic word-bank sampling → Markov chain → Qwen3-0.6B LLM polish (when the prompt
+  server is running). Seed it with your own rough idea; works entirely offline in algo mode.
+- **Style chips** — one-click modifiers for camera moves, lighting, mood, and quality,
+  appended to your prompt without retyping anything.
 
-### Server management
-- **Servers ▾** toolbar dropdown — start/stop/restart individual services from the GUI
-- **Context-aware start** — Video tab starts Wan2.2 (QB2); Animate tab starts Wan2.2-Animate; Image tab starts FLUX
-- **Server log panel** — pulsing progress bar and phase label during startup; expand "▸ Log" for raw output
-- **Job recovery** — re-attach to server jobs that survived a UI crash
+### Browsing and organizing
+
+- **Persistent gallery** — every generation saved to `~/.local/share/tt-video-gen/` with a
+  metadata sidecar (prompt, seed, steps, generation time). Nothing lost across restarts.
+- **Responsive card grid** — hover to preview video inline; click for the full detail panel.
+  Re-flows automatically as the window resizes.
+- **Full-screen player** — `F` to go fullscreen, `Space` to pause, `Esc` to close.
+- **Iterate / remix** — ↺ repopulates the prompt panel from any past generation so you can
+  tweak one parameter and re-run without retyping the whole prompt.
+- **Playlists** — create named collections and add videos or images from the gallery.
+  Each playlist doubles as a TT-TV channel.
+- **Trash / delete** — 🗑 removes a card from history and deletes the files in one step.
+
+### TT-TV (Attractor / Kiosk Mode)
+
+- **Looping media player** — borderless kiosk window that cycles your generated media with
+  channel-change flash transitions and a broadcast-style lower-third HUD (prompt, model,
+  pool size). Newly finished generations appear on-screen within a few slots of completing.
+- **Channels** — switch between playlists inside TT-TV without leaving fullscreen; each
+  channel remembers its own auto-generate setting.
+- **Audience prompt input** — a sidebar entry lets anyone type a prompt that jumps to the
+  front of the generation queue — live crowd participation during a demo.
+- **Auto-generate loop** — TT-TV continuously writes prompts and queues new generations so
+  the pool grows on its own. Toggle the auto-gen switch to pause it; playback keeps running.
+
+### Server and hardware
+
+- **Context-aware server start** — the Servers ▾ toolbar dropdown launches the right server
+  for the active tab (Wan2.2 for Video, FLUX for Image, Wan2.2-Animate for Animate).
+- **Server log panel** — pulsing progress bar and phase label during startup; expand "▸ Log"
+  for raw container output.
+- **Job recovery** — ⟳ Recover re-attaches to any server jobs that survived a UI restart.
+- **Live chip telemetry** — the status bar shows AI clock (MHz), temperature, and total power
+  draw from `tt-smi` in real time.
+- **CLI companion (`tt-ctl`)** — `./tt-ctl run "a prompt"` submits a job from the terminal;
+  `./tt-ctl status` shows server health, chip temps, and recent history. Scriptable.
 
 ---
 
