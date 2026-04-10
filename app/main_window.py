@@ -686,6 +686,8 @@ scrollbar slider:hover {
 .tt-statusbar-dot-ready   { color: @tt_success; }
 .tt-statusbar-dot-offline { color: @tt_text_muted; }
 .tt-statusbar-dot-starting { color: @tt_accent; }
+.tt-statusbar-dot-error   { color: @tt_error; }
+.tt-statusbar-seg-error   { font-size: 10px; color: @tt_error; }
 .tt-statusbar-seg {
     font-size: 10px;
     color: @tt_text_muted;
@@ -918,6 +920,31 @@ _VIDEO_MODEL_IDS: dict = {
 _IMAGE_MODEL_IDS: dict = {
     "flux": "flux.1-dev",
 }
+
+# Phase markers for parsing server log output.  Each entry is (substring, phase_label).
+# Checked in order; the first match wins.  phase_label=None means no update (terminal state
+# handled by the health check).
+_PHASE_MARKERS: list[tuple[str, "str | None"]] = [
+    ("Device 0,1,2,3: Loading model",       "Loading model"),
+    ("Loading checkpoint shards",            "Loading weights"),
+    ("loading cache at",                     "Loading compiled weights"),
+    ("Device 0,1,2,3: Model loaded",         "Model loaded"),
+    ("Submitted warmup task",                "Warming up"),
+    ("Model warmup completed",               None),
+    ("Application startup complete",         None),
+]
+
+
+def _detect_phase(line: str) -> "str | None | bool":
+    """Return the phase label for a log line, or None if no match.
+
+    Returns the string label to display, or False if the line matched but
+    has no label (terminal state — let the health check handle it).
+    """
+    for marker, label in _PHASE_MARKERS:
+        if marker in line:
+            return label if label is not None else False
+    return None
 
 
 def _apply_css() -> None:
@@ -4293,18 +4320,40 @@ class _StatusBar(Gtk.Box):
         GLib.idle_add(self._refresh_disk)
         threading.Thread(target=self._poll_loop, daemon=True).start()
 
+        # ── Elapsed-timer state ──────────────────────────────────────────────
+        # Set by update_starting(), ticked every second, cleared by
+        # update_server() and update_error().
+        self._phase: str = "starting"
+        self._start_ts: float = 0.0
+        self._timer_id: "int | None" = None
+        self._in_error: bool = False
+
     # ── Public update methods (main-thread only) ───────────────────────────────
 
     def _set_srv_dot(self, css_state: str, model_text: str, pop_text: str) -> None:
         for cls in ("tt-statusbar-dot-ready", "tt-statusbar-dot-offline",
-                    "tt-statusbar-dot-starting"):
+                    "tt-statusbar-dot-starting", "tt-statusbar-dot-error"):
             self._srv_dot.remove_css_class(cls)
         self._srv_dot.add_css_class(f"tt-statusbar-dot-{css_state}")
         self._srv_lbl.set_label(model_text)
+        # Mirror error vs normal colour on the label too
+        self._srv_lbl.remove_css_class("tt-statusbar-seg-error")
+        self._srv_lbl.remove_css_class("tt-statusbar-seg")
+        self._srv_lbl.add_css_class(
+            "tt-statusbar-seg-error" if css_state == "error" else "tt-statusbar-seg"
+        )
         self._pop_status_lbl.set_label(pop_text)
 
     def update_server(self, ready: bool, model: "str | None") -> None:
-        """Reflect server health in the status dot and model label."""
+        """Reflect server health in the status dot and model label.
+
+        Ignores ready=False calls while in error state so the health worker
+        does not silently overwrite the error indicator between retries.
+        """
+        if not ready and self._in_error:
+            return
+        self._in_error = False
+        self._stop_timer()
         if ready:
             self._set_srv_dot("ready", model or "ready", f"● {model or 'Server'} ready")
         else:
@@ -4315,11 +4364,51 @@ class _StatusBar(Gtk.Box):
 
     def update_starting(self) -> None:
         """Show 'starting' state while the server launch script is running."""
-        self._set_srv_dot("starting", "starting…", "Server starting…")
+        self._in_error = False
+        self._phase = "starting"
+        self._start_ts = time.monotonic()
+        self._set_srv_dot("starting", "starting… 0:00", "Server starting…")
         # Disable popover buttons while the script is in flight — prevents
         # double-starting or stopping a server that is mid-launch.
         self._pop_start.set_sensitive(False)
         self._pop_stop.set_sensitive(False)
+        self._start_timer()
+
+    def update_error(self, msg: str = "failed — click for details") -> None:
+        """Show the error state: red dot, error message, re-enable Start."""
+        self._in_error = True
+        self._stop_timer()
+        self._set_srv_dot("error", msg, "Server failed to start")
+        self._pop_start.set_sensitive(True)
+        self._pop_stop.set_sensitive(False)
+
+    def set_phase(self, phase: str) -> None:
+        """Update the phase label while in starting state (called on main thread)."""
+        if self._timer_id is None:
+            return  # not in starting state; ignore stale callbacks
+        self._phase = phase
+        elapsed = int(time.monotonic() - self._start_ts)
+        m, s = divmod(elapsed, 60)
+        self._srv_lbl.set_label(f"{phase}… {m}:{s:02d}")
+
+    # ── Elapsed timer (runs on main thread via GLib.timeout_add) ─────────────
+
+    def _start_timer(self) -> None:
+        if self._timer_id is not None:
+            GLib.source_remove(self._timer_id)
+        self._timer_id = GLib.timeout_add(1000, self._tick)
+
+    def _stop_timer(self) -> None:
+        if self._timer_id is not None:
+            GLib.source_remove(self._timer_id)
+            self._timer_id = None
+
+    def _tick(self) -> bool:
+        """Update the elapsed-time counter in the starting label. Main thread."""
+        elapsed = int(time.monotonic() - self._start_ts)
+        m, s = divmod(elapsed, 60)
+        self._srv_lbl.set_label(f"{self._phase}… {m}:{s:02d}")
+        return True  # keep repeating until _stop_timer() cancels the source
 
     def update_queue(self, depth: int) -> None:
         """Show or hide the queue-depth segment."""
@@ -5503,8 +5592,12 @@ class MainWindow(Gtk.ApplicationWindow):
                 recover_action.set_enabled(server_reachable and not self._controls._server_launching)
 
             # Mirror server health in the hardware status bar.
+            # Skip while a launch/stop script is in flight — the status bar
+            # stays in its "starting…" state (timer ticking) until the
+            # operation finishes, then health results flow through normally.
             display_model = _MODEL_DISPLAY.get(running_model or "", running_model or "")
-            self._hw_statusbar.update_server(ready, display_model or None)
+            if not self._controls._server_launching:
+                self._hw_statusbar.update_server(ready, display_model or None)
 
             if ready:
                 # Stop tailing the Docker log — server is confirmed up
@@ -6058,6 +6151,7 @@ class MainWindow(Gtk.ApplicationWindow):
                                   f"Script exited with code {proc.returncode}")
                     GLib.idle_add(self._set_status, "Server start script failed — check log")
                     GLib.idle_add(self._controls.set_server_launching, False)
+                    GLib.idle_add(self._hw_statusbar.update_error, "start failed — click for log")
                 else:
                     GLib.idle_add(self._set_status,
                                   f"{label} server started — waiting for health check…")
@@ -6105,9 +6199,15 @@ class MainWindow(Gtk.ApplicationWindow):
                     while not stop.wait(0.5):
                         line = f.readline()
                         if line:
+                            stripped = line.rstrip()
                             GLib.idle_add(
-                                self._controls.append_server_log, line.rstrip()
+                                self._controls.append_server_log, stripped
                             )
+                            # Update the phase label in the status bar when we
+                            # recognise a known milestone in the server log.
+                            phase = _detect_phase(stripped)
+                            if isinstance(phase, str):
+                                GLib.idle_add(self._hw_statusbar.set_phase, phase)
             except OSError as e:
                 GLib.idle_add(
                     self._controls.append_server_log, f"[log tail error: {e}]"
