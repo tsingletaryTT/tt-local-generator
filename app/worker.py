@@ -88,6 +88,7 @@ class GenerationWorker:
         seed: int,
         seed_image_path: str = "",
         model: str = "wan2.2-t2v",
+        num_frames: Optional[int] = None,
     ):
         self._client = client
         self._store = store
@@ -97,6 +98,7 @@ class GenerationWorker:
         self._seed = seed
         self._seed_image_path = seed_image_path
         self._model = model
+        self._num_frames = num_frames
         self._cancelled = False
         self._job_id_override: Optional[str] = None  # set to skip submit (recovery)
         self._current_job_id: Optional[str] = None   # set after submission / re-attach so callers can exclude it from recovery scans
@@ -142,6 +144,7 @@ class GenerationWorker:
                     negative_prompt=self._negative_prompt or None,
                     num_inference_steps=self._steps,
                     seed=seed_arg,
+                    num_frames=self._num_frames,
                 )
             except Exception as e:
                 on_error(f"Submit failed: {e}")

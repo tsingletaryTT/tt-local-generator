@@ -266,6 +266,66 @@ print("   inserted HF_HOME bind-mount block ✓")
 PYEOF
 
 echo ""
+
+# ── Step 6: Inject SkyReels into model_spec.py ───────────────────────────────
+
+MODEL_SPEC="$TT_INFER/workflows/model_spec.py"
+echo "6. Patching $MODEL_SPEC (SkyReels ModelSpecTemplate)"
+
+python3 - "$MODEL_SPEC" <<'PYEOF'
+import sys, shutil, pathlib
+
+p = pathlib.Path(sys.argv[1])
+text = p.read_text()
+
+MARKER = "Skywork/SkyReels-V2-DF-1.3B-540P-Diffusers"
+if MARKER in text:
+    print("   already patched — nothing to do")
+    sys.exit(0)
+
+# Insertion anchor: last entry before image_templates comment.
+ANCHOR = "]\n\n# =============================================================================\n# image_templates"
+if ANCHOR not in text:
+    print(f"ERROR: could not find insertion anchor in {p}")
+    sys.exit(1)
+
+SKYREELS_ENTRY = """\
+    # SkyReels-V2-DF-1.3B-540P — Blackhole (P150X4) only.
+    # Weights: ~12GB.  540P = 480x272 native res.
+    ModelSpecTemplate(
+        weights=["Skywork/SkyReels-V2-DF-1.3B-540P-Diffusers"],
+        tt_metal_commit="555f240",
+        impl=tt_transformers_impl,
+        min_disk_gb=20,
+        min_ram_gb=16,
+        model_type=ModelType.VIDEO,
+        inference_engine=InferenceEngine.MEDIA.value,
+        device_model_specs=[
+            DeviceModelSpec(
+                device=DeviceTypes.P150X4,
+                max_concurrency=1,
+                max_context=64 * 1024,
+                default_impl=True,
+            ),
+            DeviceModelSpec(
+                device=DeviceTypes.P300X2,
+                max_concurrency=1,
+                max_context=64 * 1024,
+                default_impl=True,
+            ),
+        ],
+        status=ModelStatusTypes.COMPLETE,
+    ),
+"""
+
+backup = p.with_suffix(".py.bak")
+shutil.copy2(p, backup)
+new_text = text.replace(ANCHOR, SKYREELS_ENTRY + ANCHOR, 1)
+p.write_text(new_text)
+print(f"   inserted SkyReels ModelSpecTemplate ✓  (backup: {backup.name})")
+PYEOF
+
+echo ""
 echo "Done. You can now run start_mochi.sh (or any media-server model with --dev-mode)"
 echo "and the patches/tt_dit/ files will be bind-mounted automatically."
 echo ""

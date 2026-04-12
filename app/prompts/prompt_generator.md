@@ -27,6 +27,14 @@ For **animate** prompts (Wan2.2 Animate — character animation):
 > (Keep animate prompts character-focused and action-specific — the model animates a still image,
 >  so motion direction matters more than scene detail.)
 
+For **SkyReels** prompts (SkyReels-V2-DF-1.3B-540P — cinematic short clips):
+> FPS-24, [subject] [action], [setting], [time/weather], [camera move], [style/mood]
+> SkyReels is WAN-derived and optimized for flowing, physically plausible motion. It handles
+> nature, animals, urban scenes, and wide establishing shots better than tight character close-ups.
+> Start with subject and action. Keep it simple — one motion beats five.
+> Negative prompt (always include, hidden from user): chaotic, distortion, morphing, shaky camera,
+> panning, zoom, glare, lens flare, blur, low quality, bad hands, bad teeth, bad eyes, bad limbs
+
 ---
 
 ## Word banks
@@ -301,7 +309,85 @@ Concrete and specific beats vague and atmospheric. A named thing in a real place
 
 ---
 
-### Anti-slurry guidance (Mochi / video models)
+---
+
+### SkyReels — Subjects & Motion (cinematic clips)
+
+SkyReels renders flowing, physics-respecting motion well. These subjects and pairings work:
+
+**Nature in motion**
+- a waterfall cascades down a mossy cliff face into a dark plunge pool
+- ocean waves break in slow succession against black volcanic rock
+- a field of wheat ripples in a summer wind, horizon to horizon
+- morning fog rolls slowly through a redwood forest, shafts of light cutting through
+- a thunderstorm moves across a flat prairie, lightning in the distance
+- cherry blossoms drift from a tree onto a still temple pond
+
+**Animals in motion**
+- a wolf runs through deep snow, breath streaming back
+- a bald eagle descends from altitude and snatches a fish from a river
+- a pod of humpback whales breaches in grey Pacific water
+- a herd of wild horses gallops across an orange Utah mesa
+- a crow lands on a snow-covered fence post and shakes the snow off
+- a red fox pounces into deep snow and disappears, then emerges
+
+**Cosmic and atmospheric**
+- the aurora borealis ripples in green and violet across a subarctic sky
+- a time-lapse of storm clouds building over the Rockies, shadows racing across valleys
+- a comet tail crosses a starfield in one slow arc
+- a desert sunset — the horizon line bleeds orange into deep purple
+- rain on a still alpine lake, each drop its own ring
+- a full moon rising above a desert mesa, the rock face warming from orange to white
+
+**Urban and human-scale**
+- neon signs reflect on a rain-slicked Tokyo alley, a single figure walks away from camera
+- a crowded night market — stalls, lanterns, smoke from grills, people moving
+- a subway train accelerates out of a station, carriages blurring, the last one gone
+- a lighthouse beam rotates above a dark sea, fog catching the light
+- a bridge at rush hour — cars flowing like a river, streetlights switching on
+- a woman in a long coat walks across an empty plaza in a winter wind
+
+**Cosmic abstraction / sci-fi**
+- a colossal alien structure rises above the clouds on an ice world, scale barely graspable
+- a generational starship drifts in slow rotation against the Milky Way
+- plasma filaments arc between two stellar bodies, the scale geological
+- a terraformed canyon on Mars at dusk, dust devils in the distance
+
+**SkyReels camera moves (work well)**
+- FPS-24, slow aerial descent, orbit
+- FPS-24, static locked-off, subject in motion
+- FPS-24, smooth dolly forward
+- FPS-24, low angle tracking shot
+- FPS-24, overhead crane, pull back to reveal
+- FPS-24, handheld tracking
+- FPS-24, over-the-shoulder, close-up
+
+**SkyReels strong keywords (confirmed from model training emphasis)**
+These reliably improve output quality — weave them into prompts when appropriate:
+- `cinematic` — broad quality boost; works in almost every prompt
+- `golden hour` / `blue hour` — strong lighting anchors; model renders these well
+- `slow motion` — triggers fluid motion treatment
+- `shallow depth of field` — subject separation; especially useful for character shots
+- `camera dollies in` / `camera tracks alongside` — explicit motion improves deliberateness
+- `volumetric light` / `dappled sunlight` — rich atmospheric depth
+- `mist` / `fog` — adds sense of depth and atmosphere
+- `reflection` — the model handles water, glass, and wet pavement reflections well
+- `low-angle` / `wide shot` — compositional anchors that sharpen spatial staging
+- `FPS-24` — adds at the very start of prompt; improves temporal feel
+
+**SkyReels prompt length**
+15–50 words is the sweet spot. Write it like a brief for a cinematographer — one subject,
+one camera direction, one lighting condition. Don't stack: no dreamy + ethereal + mystical
++ glowing + surreal all at once.
+
+**SkyReels negative prompt (recommended — hide from user, inject server-side)**
+`low quality, blurry, distortion, morphing, chaotic, shaky camera, panning, zoom, glare,
+lens flare, overexposed, static image, deformation, bad hands, bad teeth, bad eyes, bad limbs,
+low resolution`
+
+---
+
+### Anti-slurry guidance (Mochi / SkyReels / video models)
 When the model produces blurry atmospheric soup, use ONE of these anchors:
 - **One object, one motion**: a single thing moving in a single direction against a still background
 - **Named specificity**: a Salinas Valley / a Speak & Spell / a Betamax tape / Harryhausen skeletons — names force coherence
@@ -333,6 +419,24 @@ When the model produces blurry atmospheric soup, use ONE of these anchors:
 
 **User:** `animate: old man, emotional`
 **→** `An elderly fisherman slowly turns his face toward the horizon, weathered expression softening into a quiet smile, harbor at dawn, soft diffuse morning light, nostalgic and still`
+
+**User:** `skyreels: wolves, winter`
+**→** `FPS-24, a pack of grey wolves runs through deep snow at the edge of a pine forest, breath streaming in the cold air, low-angle tracking shot, blue-hour light, wild and alive`
+
+**User:** `skyreels: ocean at sunrise`
+**→** `FPS-24, ocean waves break against a sea cliff in golden morning light, spray catching the sun, static wide locked-off, the sea horizon flat and endless beyond`
+
+**User:** `skyreels: city in rain`
+**→** `FPS-24, a figure in a yellow raincoat walks away from camera down a wet Tokyo alley, neon reflections stretching across the cobblestones, slow dolly forward, atmospheric and solitary`
+
+**User:** `skyreels: aurora borealis`
+**→** `FPS-24, green and violet aurora ribbons ripple across a subarctic sky above a frozen lake, the ice below reflecting the light, static wide, silent and immense`
+
+**User:** `skyreels: nature, abstract`
+**→** `FPS-24, morning fog moves through a redwood forest in slow rolling waves, shafts of gold light cutting down between trunks a hundred feet tall, static locked-off, cathedral quiet`
+
+**User:** `skyreels: sci-fi`
+**→** `FPS-24, a colossal ring station rotates slowly above a gas giant, the planet's cloud bands reflecting amber in the hull, smooth orbital camera, epic and weightless`
 
 **User:** `video: Steinbeck, migrant family`
 **→** `A jalopy overloaded with furniture and children crests a dusty hill, Route 66 stretching empty ahead, flat gold light, locked-off wide shot, heartbreaking and determined`

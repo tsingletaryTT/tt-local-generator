@@ -1225,3 +1225,95 @@ def commercial_setting() -> str:
 def commercial_copy_hook() -> str:
     """Return a random product-focus camera/copy directive."""
     return pick(COMMERCIAL_COPY_HOOKS)
+
+
+# ── SkyReels-specific banks ────────────────────────────────────────────────────
+# SkyReels-V2-DF handles cinematic, physically-plausible motion better than
+# character close-ups.  Subjects, actions, and settings below are tuned for its
+# strengths: nature in motion, animals, wide landscapes, urban atmospherics,
+# and cosmic/sci-fi vistas.
+
+SKYREELS_SUBJECTS = [
+    # Nature
+    "a waterfall cascading off a mossy cliff into a dark plunge pool",
+    "a lone pine tree on a rocky coastal headland",
+    "ocean waves rolling in slow succession",
+    "a wheat field rippling in a summer wind",
+    "morning fog rolling through a redwood forest",
+    "a frozen alpine lake under a winter sky",
+    "cherry blossoms adrift over still temple water",
+    "a desert mesa at dusk, long shadows across red rock",
+    "a river bend in autumn, the banks orange and gold",
+    "thunderclouds building over flat prairie",
+    # Animals
+    "a wolf running through deep snow",
+    "a bald eagle descending toward a river",
+    "a pod of humpback whales breaching in grey Pacific water",
+    "a red fox pausing at the edge of a snowy field",
+    "a crow landing on a snow-covered fence post",
+    "a herd of wild horses galloping across an orange mesa",
+    "an elk standing at the tree line at dusk",
+    "an octopus navigating a coral reef, skin shifting colors",
+    # Urban / atmospheric
+    "a rain-soaked Tokyo alley at night, neon signs reflected in puddles",
+    "a lighthouse beam rotating above a dark sea",
+    "a crowded night market — stalls, lanterns, smoke rising from grills",
+    "a subway train accelerating out of a station, the last carriage gone",
+    "a narrow Venice canal at golden hour, a gondola moving forward",
+    "a bridge at rush hour, traffic flowing like a river",
+    "a woman in a long coat crossing an empty plaza in winter wind",
+    # Cosmic / sci-fi
+    "a colossal ring station rotating slowly above a gas giant",
+    "a lone astronaut walking across a red Martian landscape",
+    "northern lights rippling in green and violet above a frozen tundra",
+    "plasma arcs between two stellar bodies, the scale geological",
+    "a comet tail crossing a starfield in one slow arc",
+    "a terraformed canyon on Mars at dusk, dust devils in the distance",
+    # Abstract
+    "ink drops falling into water in extreme slow motion",
+    "sand dunes at sunrise casting long blue shadows",
+    "a single candle flame in complete darkness",
+    "rain on a still alpine lake, each drop its own ring",
+    "aurora reflected in a mirror-flat ice lake below",
+]
+
+SKYREELS_CAMERA = [
+    "slow dolly forward",
+    "static locked-off, subject in motion",
+    "low-angle tracking shot",
+    "overhead crane pulling back",
+    "smooth orbital movement",
+    "slow aerial descent",
+    "handheld tracking alongside",
+    "wide static, wind moving through the frame",
+    "slow tilt up to reveal",
+    "camera holds still, one element moves",
+]
+
+SKYREELS_STYLE = [
+    "cinematic, golden hour light",
+    "cinematic, blue hour, shallow depth of field",
+    "slow motion, volumetric light",
+    "cinematic, mist and atmosphere",
+    "golden hour backlight, film grain",
+    "dramatic lighting, deep shadow",
+    "cinematic, dappled sunlight",
+    "aerial cinematic, sweeping and epic",
+    "intimate and still, quiet as a held breath",
+    "cinematic, reflections on water",
+]
+
+
+def skyreels_subject() -> str:
+    """Return a random SkyReels-optimized subject/scene description."""
+    return pick(SKYREELS_SUBJECTS)
+
+
+def skyreels_camera() -> str:
+    """Return a random camera move suited to SkyReels cinematics."""
+    return pick(SKYREELS_CAMERA)
+
+
+def skyreels_style() -> str:
+    """Return a random style tag suited to SkyReels generation."""
+    return pick(SKYREELS_STYLE)

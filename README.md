@@ -8,6 +8,7 @@ A GTK4 desktop UI for generating videos and images with Tenstorrent hardware.
 |------|-------|----------|
 | Video | [Wan2.2-T2V-A14B-Diffusers](https://huggingface.co/Wan-AI/Wan2.2-T2V-A14B-Diffusers) | QB2 (P300x2) |
 | Video | [Mochi-1-preview](https://huggingface.co/genmo/mochi-1-preview) | QB2 (P300x2) |
+| Video | [SkyReels-V2-DF-1.3B-540P](https://huggingface.co/Skywork/SkyReels-V2-DF-1.3B-540P-Diffusers) | Blackhole (P150X4 / P300X2) |
 | Image | [FLUX.1-dev](https://huggingface.co/black-forest-labs/FLUX.1-dev) | 4× p300c |
 | Animate | [Wan2.2-I2V-A14B-Diffusers](https://huggingface.co/Wan-AI/Wan2.2-I2V-14B-720P-Diffusers) | CPU/CUDA (Phase 1) |
 
@@ -40,14 +41,15 @@ tt-local-generator/
     start_wan_qb2.sh     ← Wan2.2 on P300x2 (default)
     start_wan.sh         ← Wan2.2 on P150x4
     start_mochi.sh       ← Mochi-1 on QB2
+    start_skyreels.sh    ← SkyReels-V2-DF-1.3B-540P (Blackhole P150X4/P300X2)
     start_flux.sh        ← FLUX.1-dev image server
     start_animate.sh     ← Wan2.2-Animate (CPU/CUDA Phase 1)
     start_prompt_gen.sh  ← Qwen3-0.6B prompt server (CPU, port 8001)
     apply_patches.sh     ← apply patches/ to vendor/ or ~/code/tt-inference-server
     best_experience_services.sh  ← start Wan2.2 + prompt server together
   patches/               ← hotpatch files applied by apply_patches.sh
-    media_server_config/ ← constants.py overrides (P300x2 timeouts, etc.)
-    tt_dit/              ← pipeline fixes (dev_mode only)
+    media_server_config/ ← constants.py, runner, and domain overrides
+    tt_dit/              ← pipeline fixes incl. SkyReels-V2 (dev_mode only)
   vendor/                ← shallow clone of tt-inference-server (gitignored)
     tt-inference-server/ ← pinned to VENDOR_SHA, patched by apply_patches.sh
     VENDOR_SHA           ← SHA of the vendored commit
@@ -113,7 +115,7 @@ cd ~/code/tt-local-generator
 ./tt-ctl stop  wan2.2
 ./tt-ctl restart wan2.2
 
-# Known service keys: wan2.2  mochi  flux  animate  prompt-server  all
+# Known service keys: wan2.2  mochi  skyreels  flux  animate  prompt-server  all
 ```
 
 ---
@@ -212,7 +214,7 @@ python3 generate_prompt.py --count 5 --no-enhance  # algo only, five prompts
 python3 generate_prompt.py --raw                    # plain text (no JSON wrapper)
 ```
 
-JSON output: `{"prompt": "...", "type": "video|image|animate", "source": "llm|markov|algo", "slug": "..."}`
+JSON output: `{"prompt": "...", "type": "video|image|animate|skyreels", "source": "llm|markov|algo", "slug": "..."}`
 
 ```bash
 ./bin/start_prompt_gen.sh          # start Qwen server (port 8001)
@@ -231,11 +233,13 @@ cat vendor/VENDOR_SHA          # pinned SHA
 ./bin/apply_patches.sh         # apply patches/ to vendor/
 ```
 
-Patches are applied in four steps:
-1. Copy `patches/tt_dit/` into `vendor/` (dev_mode pipeline fixes)
+Patches are applied in six steps:
+1. Copy `patches/tt_dit/` into `vendor/` (dev_mode pipeline fixes, incl. SkyReels-V2)
 2. Patch `run_docker_server.py` with dev_mode bind-mounts
-3. Copy `patches/media_server_config/` into `vendor/` (constants overrides)
+3. Copy `patches/media_server_config/` into `vendor/` (constants, runner, and domain overrides)
 4. Patch `run_docker_server.py` with unconditional `constants.py` bind-mount
+5. Inject `HF_HOME` bind-mount block into `run_docker_server.py`
+6. Inject SkyReels `ModelSpecTemplate` into `workflows/model_spec.py`
 
 The `.env` in `vendor/tt-inference-server/` controls Docker container environment (including `HF_HUB_OFFLINE=1` and `TT_DIT_CACHE_DIR` for weight caching across restarts).
 
@@ -244,7 +248,7 @@ The `.env` in `vendor/tt-inference-server/` controls Docker container environmen
 ## Running tests
 
 ```bash
-/usr/bin/python3 -m pytest tests/ -q   # 83 tests, all should pass
+/usr/bin/python3 -m pytest tests/ -q   # 107 tests, all should pass
 ```
 
 ---

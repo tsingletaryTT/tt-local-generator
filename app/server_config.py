@@ -71,6 +71,11 @@ DEFAULTS: dict[str, dict] = {
         "port":  8000,
         "token": "your-secret-key",
     },
+    "skyreels": {
+        "host":  "localhost",
+        "port":  8000,
+        "token": "your-secret-key",
+    },
     "prompt-server": {
         "host":  "localhost",
         "port":  8001,

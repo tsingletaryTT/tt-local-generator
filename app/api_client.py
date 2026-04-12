@@ -193,6 +193,7 @@ class APIClient:
         negative_prompt: Optional[str] = None,
         num_inference_steps: int = 20,
         seed: Optional[int] = None,
+        num_frames: Optional[int] = None,
     ) -> str:
         """
         Submit a video generation job.
@@ -202,6 +203,9 @@ class APIClient:
             negative_prompt: Optional text describing what to avoid.
             num_inference_steps: Denoising steps, 12-50 (server default: 20).
             seed: Random seed for reproducibility. None means random.
+            num_frames: Number of output frames. None means the runner uses its
+                        default.  Valid SkyReels counts: (N-1) % 4 == 0
+                        (9, 13, 17, 21, 25, 29, 33, 65, 97, …).
 
         Returns:
             The job ID string (UUID).
@@ -218,6 +222,8 @@ class APIClient:
             payload["negative_prompt"] = negative_prompt
         if seed is not None and seed >= 0:
             payload["seed"] = seed
+        if num_frames is not None and num_frames > 0:
+            payload["num_frames"] = num_frames
 
         resp = requests.post(
             f"{self.base_url}/v1/videos/generations",

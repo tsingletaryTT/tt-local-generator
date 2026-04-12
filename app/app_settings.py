@@ -45,6 +45,9 @@ DEFAULTS: dict = {
     # Prompt director style
     "director_style_prob": 0.33,    # probability a video prompt draws a named director aesthetic
     "director_pin": "",             # "" = random pick; else exact string from CINEMATIC_DIRECTORS
+    # SkyReels video length
+    # Valid counts: (N-1) % 4 == 0  →  9 (~0.4s), 33 (~1.4s), 65 (~2.7s), 97 (~4s)
+    "skyreels_num_frames": 33,
     # Recovery
     "dismissed_job_ids": [],        # server job IDs permanently hidden from the Recover Jobs dialog
 }

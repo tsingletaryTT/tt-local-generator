@@ -190,6 +190,22 @@ def _algo_animate() -> tuple[str, dict]:
     return slug, meta
 
 
+def _algo_skyreels() -> tuple[str, dict]:
+    """
+    Build one algorithmic SkyReels prompt slug.
+
+    SkyReels is optimised for cinematic, physically-plausible motion: nature,
+    animals, wide landscapes, urban atmospherics, and cosmic vistas.
+    Camera move and style are drawn from SkyReels-specific banks.
+    """
+    subj = wb.skyreels_subject()
+    cam = wb.skyreels_camera()
+    style = wb.skyreels_style()
+    slug = f"{subj}, {cam}, {style}"
+    meta = {"subject": subj, "camera": cam, "style": style}
+    return slug, meta
+
+
 def _algo_commercial() -> tuple[str, dict]:
     """
     Build one algorithmic commercial/product-spot prompt slug.
@@ -212,6 +228,7 @@ _ALGO_FN = {
     "image": _algo_image,
     "animate": _algo_animate,
     "commercial": _algo_commercial,
+    "skyreels": _algo_skyreels,
 }
 
 # ── LLM polish ─────────────────────────────────────────────────────────────────
@@ -239,6 +256,13 @@ _TYPE_HINT = {
     "commercial": (
         "Product commercial (4-6 s clip). Keep the product the subject. "
         "One camera move, one product action. Focus on the object, not people. Under 25 words."
+    ),
+    "skyreels": (
+        "Cinematic short video (1-4 s clip). "
+        "One subject, one camera move, one lighting or mood cue. "
+        "Nature, animals, wide landscapes, urban atmosphere, or cosmic. "
+        "Use specific cinematic language: dolly, track, shallow depth of field, golden hour. "
+        "Under 30 words. No preamble, no quotes."
     ),
 }
 
@@ -356,7 +380,8 @@ Examples:
         """,
     )
     parser.add_argument(
-        "--type", choices=["video", "image", "animate", "commercial"], default="video",
+        "--type", choices=["video", "image", "animate", "commercial", "skyreels"],
+        default="video",
         help="Prompt type (default: video)",
     )
     parser.add_argument(

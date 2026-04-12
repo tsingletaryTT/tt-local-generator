@@ -18,9 +18,10 @@ sudo apt install python3-gi python3-gi-cairo gir1.2-gtk-4.0  # if missing
 
 From the GUI, use the **Servers ▾** toolbar dropdown or the **▶ Start** / **■ Stop**
 buttons in the server control row. Start is context-aware: Video tab starts
-`start_wan_qb2.sh` (QB2/P300x2) or `start_mochi.sh`; Animate tab starts
-`start_animate.sh`; Image tab starts `start_flux.sh`. Script output streams into
-a collapsible log panel that closes when the health check confirms the server is ready.
+`start_wan_qb2.sh` (QB2/P300x2), `start_mochi.sh`, or `start_skyreels.sh` depending
+on the selected video model; Animate tab starts `start_animate.sh`; Image tab starts
+`start_flux.sh`. Script output streams into a collapsible log panel that closes when
+the health check confirms the server is ready.
 
 From the terminal (all scripts are in `bin/`):
 
@@ -30,6 +31,7 @@ cd ~/code/tt-local-generator
 ./bin/start_wan_qb2.sh --stop  # stop the running server container
 ./bin/start_wan.sh             # Wan2.2-T2V on P150x4
 ./bin/start_mochi.sh           # Mochi-1 on QB2
+./bin/start_skyreels.sh        # SkyReels-V2-DF-1.3B-540P on Blackhole (P150X4/P300X2)
 ./bin/start_animate.sh         # Wan2.2-Animate-14B (CPU/CUDA Phase 1)
 ./bin/start_flux.sh            # FLUX.1-dev image server
 ./bin/start_prompt_gen.sh      # Qwen3-0.6B prompt server (CPU, port 8001)
@@ -62,6 +64,20 @@ modified `tt-media-server` files from `~/code/tt-inference-server/tt-media-serve
 into the container and upgrades `diffusers>=0.34.0` before starting uvicorn
 (Phase 1: Diffusers CPU/CUDA path — TT hardware support pending).
 
+### SkyReels mode (SkyReels-V2-DF-1.3B-540P)
+
+The **SkyReels** video model button selects SkyReels-V2-DF-1.3B-540P, a fast
+diffusion transformer that runs on **Blackhole** hardware (P150X4 or P300X2).
+Key parameters:
+
+- **Resolution** — 480×272 (540P) native
+- **Frame count** — configurable: 9 / 33 / 65 / 97 frames (Preferences → SkyReels)
+  Valid counts follow `(N-1) % 4 == 0`. Default: 33 frames (~1.4 s at 24 fps).
+- **`skyreels_num_frames`** setting in `app_settings.py` / Preferences dialog.
+- `GenerationWorker` accepts `num_frames=` and forwards it to `api_client`.
+- `start_skyreels.sh` requires `apply_patches.sh` to be run first (Step 6 injects
+  the `ModelSpecTemplate` into `model_spec.py` and copies runner patches).
+
 ## Directory layout
 
 All Python source lives in `app/`, shell scripts in `bin/`.
@@ -73,7 +89,7 @@ tt-local-generator/
   patches/               ← hotpatch files applied by bin/apply_patches.sh
   vendor/                ← shallow clone of tt-inference-server (gitignored)
   docker/                ← Docker image archive (Git LFS, ~7.4 GB)
-  tests/                 ← pytest test suite (83 tests)
+  tests/                 ← pytest test suite (107 tests)
   tt-gen                 ← GUI launcher
   tt-ctl                 ← CLI (status, history, start/stop services)
 ```
@@ -96,8 +112,8 @@ tt-local-generator/
 
 `app/server_manager.py` is the single source of truth for all managed services.
 It is imported by both `tt-ctl` and `main_window.py`. Add new services there by
-adding a `ServerDef` to `SERVERS`. Current services: `wan2.2`, `mochi`, `flux`,
-`animate`, `prompt-server`. The key `"all"` starts the recommended set
+adding a `ServerDef` to `SERVERS`. Current services: `wan2.2`, `mochi`, `skyreels`,
+`flux`, `animate`, `prompt-server`. The key `"all"` starts the recommended set
 (`wan2.2` + `prompt-server`).
 
 ```python
@@ -247,7 +263,7 @@ find ~/code/tt-local-generator/app -name "__pycache__" -type d -exec rm -rf {} +
 ## Running tests
 
 ```bash
-/usr/bin/python3 -m pytest tests/ -q   # 83 tests, all should pass
+/usr/bin/python3 -m pytest tests/ -q   # 107 tests, all should pass
 ```
 
 Tests are in `tests/` at repo root. Each file does `sys.path.insert(0, str(Path(__file__).parent.parent / "app"))` to import from `app/`. Tests mock all subprocess and network calls.
@@ -321,9 +337,10 @@ python3 app/generate_prompt.py --count 5 --no-enhance
 python3 app/generate_prompt.py --raw
 
 # All types
-python3 app/generate_prompt.py --type video    # for Wan2.2 / Mochi
-python3 app/generate_prompt.py --type image    # for FLUX / SD
-python3 app/generate_prompt.py --type animate  # for Wan2.2-Animate
+python3 app/generate_prompt.py --type video      # for Wan2.2 / Mochi
+python3 app/generate_prompt.py --type image      # for FLUX / SD
+python3 app/generate_prompt.py --type animate    # for Wan2.2-Animate
+python3 app/generate_prompt.py --type skyreels   # for SkyReels-V2
 ```
 
 ### JSON output schema
@@ -331,7 +348,7 @@ python3 app/generate_prompt.py --type animate  # for Wan2.2-Animate
 ```json
 {
   "prompt": "Final polished prompt string",
-  "type":   "video" | "image" | "animate",
+  "type":   "video" | "image" | "animate" | "skyreels",
   "source": "llm" | "markov" | "algo",
   "slug":   "Raw pre-polish slug (always present)"
 }
@@ -402,6 +419,7 @@ app startup sequence (same pattern as the video server). Poll `/health` until
 | UI tab / source | `--type` |
 |---|---|
 | Video (Wan2.2, Mochi) | `video` |
+| Video (SkyReels) | `skyreels` |
 | Image (FLUX, SD) | `image` |
 | Animate (Wan2.2-Animate) | `animate` |
 

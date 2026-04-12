@@ -865,10 +865,11 @@ _DETAIL_VIDEO_H = 270
 # Maps internal model ID strings to short display names shown on gallery badges.
 # Empty string → no badge (legacy records without model attribution).
 _MODEL_DISPLAY: dict = {
-    "wan2.2-t2v":         "Wan2.2",
-    "mochi-1-preview":    "Mochi-1",
-    "flux.1-dev":         "FLUX",
-    "wan2.2-animate-14b": "Animate-14B",
+    "wan2.2-t2v":            "Wan2.2",
+    "mochi-1-preview":       "Mochi-1",
+    "flux.1-dev":            "FLUX",
+    "wan2.2-animate-14b":    "Animate-14B",
+    "skyreels-v2-1.3b-540p": "SkyReels",
 }
 
 # Short director names shown in the menu + Preferences dialog, mapped to the
@@ -906,16 +907,18 @@ _SKIP_META_KEYS: frozenset = frozenset({
 
 # Maps (model_source, model_key) to (script_filename, display_label) for server launch.
 _SERVER_SCRIPTS: dict = {
-    ("video",   "wan2"):  ("start_wan_qb2.sh", "Wan2.2 video (P300X2)"),
-    ("video",   "mochi"): ("start_mochi.sh",   "Mochi-1 video"),
-    ("image",   "flux"):  ("start_flux.sh",    "FLUX image"),
-    ("animate", ""):      ("start_animate.sh", "Wan2.2-Animate"),
+    ("video",   "wan2"):      ("start_wan_qb2.sh",  "Wan2.2 video (P300X2)"),
+    ("video",   "mochi"):     ("start_mochi.sh",    "Mochi-1 video"),
+    ("video",   "skyreels"):  ("start_skyreels.sh", "SkyReels-V2 video (Blackhole)"),
+    ("image",   "flux"):      ("start_flux.sh",     "FLUX image"),
+    ("animate", ""):          ("start_animate.sh",  "Wan2.2-Animate"),
 }
 
 # Maps short model keys to canonical model ID strings used in GenerationRecord.
 _VIDEO_MODEL_IDS: dict = {
-    "wan2":  "wan2.2-t2v",
-    "mochi": "mochi-1-preview",
+    "wan2":      "wan2.2-t2v",
+    "mochi":     "mochi-1-preview",
+    "skyreels":  "skyreels-v2-1.3b-540p",
 }
 _IMAGE_MODEL_IDS: dict = {
     "flux": "flux.1-dev",
@@ -2125,21 +2128,30 @@ class GalleryWidget(Gtk.Box):
 # Maps server model ID → UI source tab key.
 # Used by both ControlPanel.set_server_state() and MainWindow._on_health_result().
 _MODEL_TO_SOURCE: dict = {
-    "wan2.2-t2v":           "video",
-    "mochi-1-preview":      "video",
-    "wan2.2-animate-14b":   "animate",
-    "flux.1-dev":           "image",
+    "wan2.2-t2v":            "video",
+    "mochi-1-preview":       "video",
+    "skyreels-v2-1.3b-540p": "video",
+    # Full HuggingFace model ID as reported by the inference server's /v1/models endpoint
+    "Skywork/SkyReels-V2-DF-1.3B-540P-Diffusers": "video",
+    "wan2.2-animate-14b":    "animate",
+    "flux.1-dev":            "image",
 }
 # Maps server model ID → internal video-model key used by ControlPanel
 _MODEL_TO_VIDEO_KEY: dict = {
-    "wan2.2-t2v":      "wan2",
-    "mochi-1-preview": "mochi",
+    "wan2.2-t2v":            "wan2",
+    "mochi-1-preview":       "mochi",
+    "skyreels-v2-1.3b-540p": "skyreels",
+    # Full HuggingFace model ID as reported by the inference server's /v1/models endpoint
+    "Skywork/SkyReels-V2-DF-1.3B-540P-Diffusers": "skyreels",
 }
 _MODEL_DISPLAY_SERVER: dict = {
-    "wan2.2-t2v":           "Wan2.2 online",
-    "mochi-1-preview":      "Mochi-1 online",
-    "wan2.2-animate-14b":   "Animate-14B online",
-    "flux.1-dev":           "FLUX online",
+    "wan2.2-t2v":            "Wan2.2 online",
+    "mochi-1-preview":       "Mochi-1 online",
+    "skyreels-v2-1.3b-540p": "SkyReels online",
+    # Full HuggingFace model ID as reported by the inference server's /v1/models endpoint
+    "Skywork/SkyReels-V2-DF-1.3B-540P-Diffusers": "SkyReels online",
+    "wan2.2-animate-14b":    "Animate-14B online",
+    "flux.1-dev":            "FLUX online",
 }
 
 class ControlPanel(Gtk.Box):
@@ -2285,17 +2297,29 @@ class ControlPanel(Gtk.Box):
         )
         self._mdl_mochi_btn = Gtk.ToggleButton(label="Mochi-1")
         self._mdl_mochi_btn.add_css_class("source-btn")
-        self._mdl_mochi_btn.add_css_class("source-btn-right")
+        self._mdl_mochi_btn.add_css_class("source-btn-mid")
         self._mdl_mochi_btn.set_tooltip_text(
             "Mochi-1  ·  480×848  ·  168 frames  ·  ~5–15 min\n"
             "Launches start_mochi.sh"
         )
         self._mdl_mochi_btn.set_group(self._mdl_wan2_btn)
+
+        self._mdl_skyreels_btn = Gtk.ToggleButton(label="SkyReels")
+        self._mdl_skyreels_btn.add_css_class("source-btn")
+        self._mdl_skyreels_btn.add_css_class("source-btn-right")
+        self._mdl_skyreels_btn.set_tooltip_text(
+            "SkyReels-V2-DF-1.3B-540P  ·  480×272  ·  33 frames  ·  Blackhole\n"
+            "Launches start_skyreels.sh  (P300X2)"
+        )
+        self._mdl_skyreels_btn.set_group(self._mdl_wan2_btn)
+
         self._mdl_wan2_btn.connect("toggled", lambda b: b.get_active() and self._set_model("wan2"))
         self._mdl_mochi_btn.connect("toggled", lambda b: b.get_active() and self._set_model("mochi"))
+        self._mdl_skyreels_btn.connect("toggled", lambda b: b.get_active() and self._set_model("skyreels"))
         self._mdl_wan2_btn.set_active(True)
         self._model_sel_row.append(self._mdl_wan2_btn)
         self._model_sel_row.append(self._mdl_mochi_btn)
+        self._model_sel_row.append(self._mdl_skyreels_btn)
 
         # ── Image model selector ──────────────────────────────────────────────
         self._img_model_sel_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
@@ -2331,7 +2355,7 @@ class ControlPanel(Gtk.Box):
         self._servers_btn.set_hexpand(False)
         self._servers_btn.set_tooltip_text(
             "Start, stop, or restart managed services\n"
-            "(Wan2.2, Mochi, FLUX, Animate, Prompt Generator)"
+            "(Wan2.2, Mochi, SkyReels, FLUX, Animate, Prompt Generator)"
         )
         self._servers_popover = self._build_servers_popover()
         self._servers_btn.set_popover(self._servers_popover)
@@ -3095,7 +3119,29 @@ class ControlPanel(Gtk.Box):
         all_row.append(all_play_btn)
         self._playlists_outer.append(all_row)
 
+        # Dynamic "By Model" rows — rebuilt each time the popover opens.
+        sep2 = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        sep2.set_margin_top(6)
+        sep2.set_margin_bottom(2)
+        self._playlists_outer.append(sep2)
+        model_hdr = Gtk.Label(label="By Model")
+        model_hdr.add_css_class("servers-popover-label")
+        model_hdr.set_xalign(0)
+        model_hdr.set_margin_bottom(2)
+        self._playlists_outer.append(model_hdr)
+        self._model_rows_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self._playlists_outer.append(self._model_rows_box)
+
         # Dynamic per-playlist rows are appended/rebuilt in _rebuild_playlist_rows()
+        sep3 = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        sep3.set_margin_top(6)
+        sep3.set_margin_bottom(2)
+        self._playlists_outer.append(sep3)
+        playlist_hdr = Gtk.Label(label="Your Playlists")
+        playlist_hdr.add_css_class("servers-popover-label")
+        playlist_hdr.set_xalign(0)
+        playlist_hdr.set_margin_bottom(2)
+        self._playlists_outer.append(playlist_hdr)
         self._playlists_rows_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self._playlists_outer.append(self._playlists_rows_box)
 
@@ -3104,7 +3150,57 @@ class ControlPanel(Gtk.Box):
 
     def _on_playlists_popover_show(self, _popover) -> None:
         """Rebuild the dynamic playlist rows each time the popover opens."""
+        self._rebuild_model_rows()
         self._rebuild_playlist_rows()
+
+    def _rebuild_model_rows(self) -> None:
+        """Rebuild the By Model rows from the current history."""
+        child = self._model_rows_box.get_first_child()
+        while child:
+            nxt = child.get_next_sibling()
+            self._model_rows_box.remove(child)
+            child = nxt
+
+        # Count videos per model ID from history.
+        records = self._store.all_records()
+        counts: dict[str, int] = {}
+        for r in records:
+            mid = getattr(r, "model", "") or ""
+            if mid and getattr(r, "media_type", "video") != "image":
+                counts[mid] = counts.get(mid, 0) + 1
+
+        if not counts:
+            lbl = Gtk.Label(label="No videos yet")
+            lbl.add_css_class("playlists-popover-count")
+            lbl.set_xalign(0)
+            lbl.set_margin_start(4)
+            self._model_rows_box.append(lbl)
+            return
+
+        for model_id, count in sorted(counts.items(), key=lambda x: -x[1]):
+            display = _MODEL_DISPLAY.get(model_id, model_id)
+            row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+            row.add_css_class("playlists-popover-row")
+            text_col = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+            text_col.set_hexpand(True)
+            name_lbl = Gtk.Label(label=display)
+            name_lbl.add_css_class("playlists-popover-name")
+            name_lbl.set_xalign(0)
+            text_col.append(name_lbl)
+            count_lbl = Gtk.Label(label=f"{count} video{'s' if count != 1 else ''}")
+            count_lbl.add_css_class("playlists-popover-count")
+            count_lbl.set_xalign(0)
+            text_col.append(count_lbl)
+            row.append(text_col)
+            play_btn = Gtk.Button(label="▶")
+            play_btn.add_css_class("servers-popover-btn")
+            play_btn.set_tooltip_text(f"Watch all {display} videos in TT-TV")
+            play_btn.connect("clicked", lambda _b, mid=model_id: (
+                self._playlists_btn.get_popover().popdown(),
+                self._on_open_attractor_for_model(mid),
+            ))
+            row.append(play_btn)
+            self._model_rows_box.append(row)
 
     def _rebuild_playlist_rows(self) -> None:
         """Clear and rebuild the per-playlist rows from the current store."""
@@ -3405,6 +3501,14 @@ class ControlPanel(Gtk.Box):
                     "Start the Mochi-1 inference server.\n"
                     "Video (Mochi-1) → start_mochi.sh"
                 )
+            elif model == "skyreels":
+                self._source_desc_lbl.set_label(
+                    "async job  ·  SkyReels-V2-DF-1.3B  ·  ~2–5 min  ·  480×272 9-frame  ·  Blackhole"
+                )
+                self._server_start_btn.set_tooltip_text(
+                    "Start the SkyReels-V2 inference server.\n"
+                    "Video (SkyReels) → start_skyreels.sh  (P150X4 Blackhole)"
+                )
             else:
                 self._source_desc_lbl.set_label(
                     "async job  ·  Wan2.2-T2V  ·  ~3–10 min  ·  720p MP4"
@@ -3420,7 +3524,7 @@ class ControlPanel(Gtk.Box):
         return self._model_source
 
     def get_video_model(self) -> str:
-        """Return the currently selected video model key ('wan2' or 'mochi')."""
+        """Return the currently selected video model key ('wan2', 'mochi', or 'skyreels')."""
         return self._video_model
 
     def get_image_model(self) -> str:
@@ -3493,6 +3597,8 @@ class ControlPanel(Gtk.Box):
                 if video_key and self._video_model != video_key:
                     if video_key == "mochi":
                         self._mdl_mochi_btn.set_active(True)
+                    elif video_key == "skyreels":
+                        self._mdl_skyreels_btn.set_active(True)
                     else:
                         self._mdl_wan2_btn.set_active(True)
 
@@ -4667,6 +4773,9 @@ class PreferencesDialog(Gtk.Window):
         )
         self._mw = main_window
         self.set_transient_for(main_window)
+        app = main_window.get_application()
+        if app is not None:
+            self.set_application(app)
         self._build()
 
     def _section(self, title: str) -> Gtk.Label:
@@ -4851,6 +4960,39 @@ class PreferencesDialog(Gtk.Window):
                              "Always use this director's style in video prompts. "
                              "'Random' samples from the full list based on the probability above."))
         self._director_drop = director_drop
+
+        # ── SkyReels ──────────────────────────────────────────────────────────
+        box.append(self._section("SkyReels"))
+
+        # Video duration selector (frame count).
+        # Valid SkyReels counts: (N-1) % 4 == 0  →  9, 13, 17, 21, 25, 29, 33, 65, 97, ...
+        skyreels_durations = [
+            ("9 frames  (0.4 s  — fast test)", 9),
+            ("33 frames (1.4 s  — default)", 33),
+            ("65 frames (2.7 s  — longer)", 65),
+            ("97 frames (4.0 s  — cinematic)", 97),
+        ]
+        sr_frames_model = Gtk.StringList()
+        for label, _ in skyreels_durations:
+            sr_frames_model.append(label)
+        sr_frames_drop = Gtk.DropDown(model=sr_frames_model)
+        sr_frames_drop.set_size_request(230, -1)
+        current_frames = int(_settings.get("skyreels_num_frames") or 33)
+        for i, (_, frames) in enumerate(skyreels_durations):
+            if frames == current_frames:
+                sr_frames_drop.set_selected(i)
+                break
+        def _on_sr_frames_changed(drop, _param, durations=skyreels_durations):
+            idx = drop.get_selected()
+            if 0 <= idx < len(durations):
+                _settings.set("skyreels_num_frames", durations[idx][1])
+        sr_frames_drop.connect("notify::selected", _on_sr_frames_changed)
+        box.append(self._row(
+            "Video duration (SkyReels):", sr_frames_drop,
+            "Number of frames to generate per SkyReels job.\n"
+            "Longer clips take proportionally longer to generate.\n"
+            "Valid counts: (N-1) % 4 == 0  →  9, 13, 17, 21, 25, 29, 33, 65, 97…"
+        ))
 
         # ── Servers ───────────────────────────────────────────────────────────
         box.append(self._section("Servers"))
@@ -5675,6 +5817,13 @@ class MainWindow(Gtk.ApplicationWindow):
         """
         system_prompt = self._prompt_gen_system_prompt
 
+        # Refine generic "video" source to model-specific type when the active
+        # video model has its own prompt vocabulary (SkyReels, etc.).
+        if source == "video":
+            active_video_model = self._controls.get_video_model()
+            if active_video_model == "skyreels":
+                source = "skyreels"
+
         def run():
             try:
                 text = prompt_client.generate_prompt(source, seed_text, system_prompt)
@@ -5841,15 +5990,25 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def _on_open_attractor_for_playlist(self, playlist_id: "str | None") -> None:
         """Open TT-TV filtered to the given playlist (or all videos if None)."""
-        # Close existing attractor window so we can reopen with new filter.
         if self._attractor_win is not None:
             self._attractor_win.destroy()
             self._attractor_win = None
         self._on_open_attractor(playlist_id=playlist_id)
 
+    def _on_open_attractor_for_model(self, model_id: str) -> None:
+        """Open TT-TV showing only videos generated by the given model."""
+        if self._attractor_win is not None:
+            self._attractor_win.destroy()
+            self._attractor_win = None
+        self._on_open_attractor(model_filter=model_id)
+
     # ── Attractor Mode ─────────────────────────────────────────────────────────
 
-    def _on_open_attractor(self, _btn=None, playlist_id: "str | None" = None) -> None:
+    def _on_open_attractor(
+        self, _btn=None,
+        playlist_id: "str | None" = None,
+        model_filter: "str | None" = None,
+    ) -> None:
         """Open (or raise) the Attractor Mode kiosk window."""
         if self._attractor_win is not None:
             self._attractor_win.present()
@@ -5860,9 +6019,13 @@ class MainWindow(Gtk.ApplicationWindow):
         for gallery in (self._video_gallery, self._animate_gallery, self._image_gallery):
             gallery.stop_all_playback()
 
-        # Filter records to the chosen playlist, or use all records.
+        # Filter records to the chosen playlist / model, or use all records.
         all_records = self._store.all_records()
-        if playlist_id is not None:
+        if model_filter is not None:
+            records = [r for r in all_records
+                       if getattr(r, "model", "") == model_filter]
+            auto_generate = False   # don't auto-gen into a model-filtered view
+        elif playlist_id is not None:
             from playlist_store import playlist_store as _ps
             pl = _ps.get(playlist_id)
             playlist_record_ids = set(pl.record_ids) if pl else set()
@@ -6076,6 +6239,11 @@ class MainWindow(Gtk.ApplicationWindow):
                 model_id or self._controls.get_video_model(), "wan2.2-t2v"
             )
             self._set_status(f"Submitting {model_name} video generation job…")
+            # Pass num_frames for SkyReels (configurable via Preferences → SkyReels).
+            # Other models ignore num_frames (it's None by default).
+            num_frames_arg: "int | None" = None
+            if model_name == "skyreels-v2-1.3b-540p":
+                num_frames_arg = int(_settings.get("skyreels_num_frames") or 33)
             gen = GenerationWorker(
                 client=self._client,
                 store=self._store,
@@ -6085,6 +6253,7 @@ class MainWindow(Gtk.ApplicationWindow):
                 seed=seed,
                 seed_image_path=seed_image_path,
                 model=model_name,
+                num_frames=num_frames_arg,
             )
         self._worker_gen = gen
 

@@ -94,6 +94,13 @@ SERVERS: dict[str, ServerDef] = {
             runner_key="tt-wan2.2-animate",
         ),
         ServerDef(
+            key="skyreels",
+            label="SkyReels-V2-DF-1.3B-540P  (Blackhole)",
+            script="start_skyreels.sh",
+            health_url="http://localhost:8000/tt-liveness",
+            runner_key="tt-skyreels-v2",
+        ),
+        ServerDef(
             key="prompt-server",
             label="Prompt Generator  (Qwen3-0.6B)",
             script="start_prompt_gen.sh",
