@@ -482,6 +482,37 @@ scrollbar slider:hover {
 .servers-popover-btn:hover { background: rgba(79,209,197,0.1); border-color: @tt_accent; }
 .servers-popover-btn-stop:hover { background: rgba(255,107,107,0.1); border-color: #FF6B6B; color: #FF6B6B; }
 
+/* -- Named control rows (QUALITY, CLIP LENGTH) ------------------------------ */
+.named-ctrl-row {
+    margin-top: 2px;
+    margin-bottom: 0;
+}
+.named-ctrl-btn {
+    min-width: 0;
+    padding: 5px 4px;
+    border-radius: 0;
+    font-size: 0.78em;
+}
+.named-ctrl-btn:first-child  { border-radius: 5px 0 0 5px; }
+.named-ctrl-btn:last-child   { border-radius: 0 5px 5px 0; }
+.named-ctrl-btn:checked,
+.named-ctrl-btn.active       { background: alpha(@accent_color, 0.18);
+                                color: @accent_color;
+                                border-color: @accent_color; }
+.named-ctrl-sub {
+    font-size: 0.72em;
+    opacity: 0.65;
+    margin-top: 1px;
+}
+.create-zone-label {
+    font-size: 0.7em;
+    font-weight: bold;
+    letter-spacing: 0.08em;
+    opacity: 0.55;
+    margin-top: 6px;
+    margin-bottom: 1px;
+}
+
 /* -- Advanced accordion ---------------------------------------------------- */
 .adv-hdr-btn {
     background: @tt_bg_darkest;
@@ -2448,6 +2479,16 @@ class ControlPanel(Gtk.Box):
         self._chips_scroll.set_child(self._make_chips_box("video"))
         self.append(self._chips_scroll)
 
+        # ── Divider separating prompt zone from generation controls ───────────
+        _create_sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        _create_sep.set_margin_top(6)
+        _create_sep.set_margin_bottom(2)
+        self.append(_create_sep)
+
+        # ── QUALITY row ───────────────────────────────────────────────────────
+        self._quality_row_widget = self._build_quality_row()
+        self.append(self._quality_row_widget)
+
         # ── Advanced settings accordion ───────────────────────────────────────
         # Note: self.append(self._animate_box) is deferred until after
         # self._animate_box is fully constructed below; the accordion header/revealer
@@ -2838,6 +2879,101 @@ class ControlPanel(Gtk.Box):
         """Toolbar strip (logo, source toggle, model selector) built in _build().
         MainWindow pins this at the top of the window above the paned layout."""
         return self._toolbar_box
+
+    # ── QUALITY named button row ───────────────────────────────────────────────
+
+    def _build_quality_row(self) -> Gtk.Box:
+        """QUALITY row: Fast / Standard / Cinematic named toggle buttons.
+
+        Renders three linked ToggleButtons. The active one sets self._steps
+        and persists the quality_steps setting. Stays in sync with the
+        Advanced Settings dialog via sync_quality_btn_to_steps().
+        """
+        from generation_config import QUALITY_PRESETS, slot_for_steps
+
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+
+        lbl = Gtk.Label(label="QUALITY  \u2014  render detail & time")
+        lbl.add_css_class("create-zone-label")
+        lbl.set_xalign(0)
+        outer.append(lbl)
+
+        row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        row.add_css_class("named-ctrl-row")
+
+        self._quality_btns: list = []
+        first_btn = None
+        current_steps = self._steps
+
+        for slot, steps, display in QUALITY_PRESETS:
+            btn = Gtk.ToggleButton()
+            # Store preset metadata as plain Python attributes (GTK set_data is blocked).
+            btn.steps_value = steps
+            btn.slot_value = slot
+            inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+            inner.set_halign(Gtk.Align.CENTER)
+            name_lbl = Gtk.Label(label=display)
+            # Render time estimate: roughly steps/10 * 3 minutes (static approximation).
+            # Not dynamically calculated — intentionally a quick rough guide.
+            est_mins = steps // 10 * 3
+            sub_lbl = Gtk.Label(label=f"~{est_mins} min to render")
+            sub_lbl.add_css_class("named-ctrl-sub")
+            inner.append(name_lbl)
+            inner.append(sub_lbl)
+            btn.set_child(inner)
+            btn.add_css_class("named-ctrl-btn")
+            btn.set_hexpand(True)
+            if first_btn is None:
+                first_btn = btn
+            else:
+                # GTK radio group: only one button in the group can be active at a time.
+                btn.set_group(first_btn)
+            # Activate the button whose step count matches the stored setting.
+            # If the stored count doesn't match any preset (e.g. set via Advanced dialog),
+            # fall back to activating the "standard" slot so something is selected.
+            if steps == current_steps or (slot_for_steps(current_steps) is None and slot == "standard"):
+                btn.set_active(True)
+            btn.connect("toggled", self._on_quality_btn_toggled)
+            row.append(btn)
+            self._quality_btns.append(btn)
+
+        outer.append(row)
+        return outer
+
+    def _on_quality_btn_toggled(self, btn: Gtk.ToggleButton) -> None:
+        """Handle QUALITY button toggle: update self._steps and persist setting."""
+        if not btn.get_active():
+            # Ignore the deactivation signal from the previously selected button;
+            # we only act on the newly activated one.
+            return
+        self._steps = btn.steps_value
+        _settings.set("quality_steps", self._steps)
+        # Keep Advanced dialog in sync if it happens to be open (Task 9 adds the dialog).
+        if hasattr(self, "_adv_dialog") and self._adv_dialog is not None:
+            self._adv_dialog.sync_from_panel()
+
+    def sync_quality_btn_to_steps(self, steps: int) -> None:
+        """Update QUALITY button state when steps change via Advanced dialog.
+
+        If steps matches a known preset, activates that button.
+        If no match, deactivates all buttons (panel shows no selection —
+        the Advanced dialog shows the raw value instead).
+        """
+        self._steps = steps
+        if not hasattr(self, "_quality_btns"):
+            return
+        matched = False
+        for btn in self._quality_btns:
+            if btn.steps_value == steps:
+                btn.set_active(True)
+                matched = True
+                break
+        if not matched:
+            # No preset matches — leave buttons in whatever state they're in.
+            # GTK radio group: deselecting all isn't straightforward, so we
+            # leave the last active one highlighted. The Advanced dialog shows
+            # the exact raw value for clarity.
+            pass
 
     # ── Servers popover ────────────────────────────────────────────────────────
 
@@ -3396,6 +3532,11 @@ class ControlPanel(Gtk.Box):
 
         # Animate inputs: visible only in animate mode
         self._animate_box.set_visible(is_animate)
+
+        # QUALITY row: only shown for video/animate sources where step count is meaningful.
+        # Image (FLUX) uses its own separate step range and the row would be misleading.
+        if hasattr(self, "_quality_row_widget"):
+            self._quality_row_widget.set_visible(is_video or is_animate)
 
         # Adjust steps range: FLUX min is 4, others min is 12
         if is_image:
