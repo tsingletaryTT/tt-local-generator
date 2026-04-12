@@ -547,6 +547,20 @@ scrollbar slider:hover {
                         color: #ec96b8;
                         border-color: #ec96b8; }
 
+/* -- Seed thumbnail well ---------------------------------------------------- */
+/* Small 40×40 drop target that sits inline before "✨ Inspire me". */
+.seed-thumb-well {
+    border: 1px dashed alpha(@borders, 0.7);
+    border-radius: 5px;
+    min-width: 36px;
+    min-height: 36px;
+}
+/* Solid teal border when a seed image is loaded */
+.seed-thumb-well.has-seed {
+    border-style: solid;
+    border-color: @accent_color;
+}
+
 /* -- Advanced accordion ---------------------------------------------------- */
 .adv-hdr-btn {
     background: @tt_bg_darkest;
@@ -2444,7 +2458,41 @@ class ControlPanel(Gtk.Box):
 
         # ── Inspire row ───────────────────────────────────────────────────────
         # "✨ Inspire me" button + status dot for the prompt gen server (port 8001).
+        # The seed thumbnail well sits at the left edge of this row so the user
+        # can quickly load/clear a seed image without opening Advanced Settings.
         inspire_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+
+        # ── Seed image well (inline) ──────────────────────────────────────────
+        # 40×40 thumbnail drop target placed BEFORE the Inspire me button.
+        # Left-click opens a file picker; right-click clears the current seed.
+        self._seed_thumb_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        self._seed_thumb_box.set_size_request(40, 40)
+        self._seed_thumb_box.set_tooltip_text(
+            "Seed image — click to browse, right-click to clear\n"
+            "Drop a gallery frame here to use as seed image"
+        )
+        self._seed_thumb_box.add_css_class("seed-thumb-well")
+
+        # Placeholder icon shown when no seed image is loaded
+        self._seed_thumb_placeholder = Gtk.Label(label="\U0001f5bc")
+        self._seed_thumb_placeholder.set_vexpand(True)
+        self._seed_thumb_placeholder.set_valign(Gtk.Align.CENTER)
+        self._seed_thumb_box.append(self._seed_thumb_placeholder)
+
+        # Left-click: open file picker
+        thumb_click = Gtk.GestureClick()
+        thumb_click.set_button(1)  # primary mouse button
+        thumb_click.connect("released", lambda g, n, x, y: self._pick_seed_image(None))
+        self._seed_thumb_box.add_controller(thumb_click)
+
+        # Right-click: clear the seed image
+        thumb_rclick = Gtk.GestureClick()
+        thumb_rclick.set_button(3)  # secondary mouse button
+        thumb_rclick.connect("released", lambda g, n, x, y: self._clear_seed_image())
+        self._seed_thumb_box.add_controller(thumb_rclick)
+
+        inspire_row.append(self._seed_thumb_box)
+
         self._inspire_btn = Gtk.Button(label="✨ Inspire me")
         self._inspire_btn.add_css_class("inspire-btn")
         self._inspire_btn.set_tooltip_text(
@@ -4227,7 +4275,49 @@ class ControlPanel(Gtk.Box):
             self._set_seed_image(path)
 
     def _set_seed_image(self, path: str) -> None:
+        """Set the seed image path and update both the inline thumbnail well
+        (Inspire row) and the Advanced accordion display.
+
+        Pass an empty string to clear the seed image.
+        """
         self._seed_image_path = path
+
+        # ── Update the inline thumbnail well (Task 8) ─────────────────────────
+        # Replace every child of _seed_thumb_box with either a thumbnail
+        # Picture widget or the placeholder icon label.
+        if hasattr(self, "_seed_thumb_box"):
+            # Remove all current children from the well
+            child = self._seed_thumb_box.get_first_child()
+            while child:
+                self._seed_thumb_box.remove(child)
+                child = self._seed_thumb_box.get_first_child()
+
+            if path:
+                # Load a pixbuf scaled to fit the 36×36 interior of the well
+                pb = _load_pixbuf(path, 36, 36)
+                if pb:
+                    img = Gtk.Picture.new_for_pixbuf(pb)
+                    img.set_size_request(36, 36)
+                    img.set_can_shrink(False)
+                    img.set_vexpand(True)
+                    self._seed_thumb_box.append(img)
+                    self._seed_thumb_box.add_css_class("has-seed")
+                else:
+                    # Pixbuf load failed — show a question-mark placeholder
+                    lbl = Gtk.Label(label="?")
+                    lbl.set_vexpand(True)
+                    lbl.set_valign(Gtk.Align.CENTER)
+                    self._seed_thumb_box.append(lbl)
+                    self._seed_thumb_box.remove_css_class("has-seed")
+            else:
+                # No seed — restore the picture-frame placeholder icon
+                lbl = Gtk.Label(label="\U0001f5bc")
+                lbl.set_vexpand(True)
+                lbl.set_valign(Gtk.Align.CENTER)
+                self._seed_thumb_box.append(lbl)
+                self._seed_thumb_box.remove_css_class("has-seed")
+
+        # ── Update the Advanced accordion display (pre-existing logic) ─────────
         pb = _load_pixbuf(path, 64, 36)
         # Replace the placeholder label with a Picture widget
         parent = self._seed_img_widget.get_parent()
@@ -4244,13 +4334,26 @@ class ControlPanel(Gtk.Box):
         self._clear_seed_btn.set_sensitive(True)
 
     def _clear_seed_image(self) -> None:
-        self._seed_image_path = ""
+        """Clear the seed image and reset all displays (thumbnail well + accordion).
+
+        Delegates to _set_seed_image("") for the well and accordion Picture
+        widget, then resets the accordion's "none" label appearance and
+        disables the Clear button.
+        """
+        # Drive the thumbnail well and accordion Picture update through the
+        # shared setter so both stay in sync.
+        self._set_seed_image("")
+
+        # After _set_seed_image("") the accordion widget is a generic "?"
+        # label; replace it with the styled "none" label used when empty.
         parent = self._seed_img_widget.get_parent()
-        parent.remove(self._seed_img_widget)
-        self._seed_img_widget = Gtk.Label(label="none")
-        self._seed_img_widget.set_size_request(64, 36)
-        self._seed_img_widget.add_css_class("muted")
-        parent.prepend(self._seed_img_widget)
+        if parent is not None:
+            parent.remove(self._seed_img_widget)
+            self._seed_img_widget = Gtk.Label(label="none")
+            self._seed_img_widget.set_size_request(64, 36)
+            self._seed_img_widget.add_css_class("muted")
+            parent.prepend(self._seed_img_widget)
+
         self._clear_seed_btn.set_sensitive(False)
 
     # ── Animate file pickers ───────────────────────────────────────────────────
