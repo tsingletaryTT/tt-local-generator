@@ -548,7 +548,7 @@ scrollbar slider:hover {
                         border-color: #ec96b8; }
 
 /* -- Seed thumbnail well ---------------------------------------------------- */
-/* Small 40×40 drop target that sits inline before "✨ Inspire me". */
+/* Small 40x40 drop target that sits inline before the Inspire me button. */
 .seed-thumb-well {
     border: 1px dashed alpha(@borders, 0.7);
     border-radius: 5px;
