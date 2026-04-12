@@ -2485,6 +2485,12 @@ class ControlPanel(Gtk.Box):
         _create_sep.set_margin_bottom(2)
         self.append(_create_sep)
 
+        # ── CLIP LENGTH row ───────────────────────────────────────────────────
+        # Placed after the prompt-zone separator, before QUALITY, so the layout
+        # order is: chips → [divider] → CLIP LENGTH → QUALITY → Advanced accordion.
+        self._clip_length_row_widget = self._build_clip_length_row()
+        self.append(self._clip_length_row_widget)
+
         # ── QUALITY row ───────────────────────────────────────────────────────
         self._quality_row_widget = self._build_quality_row()
         self.append(self._quality_row_widget)
@@ -2978,6 +2984,117 @@ class ControlPanel(Gtk.Box):
             # leave the last active one highlighted. The Advanced dialog shows
             # the exact raw value for clarity.
             pass
+
+    # ── CLIP LENGTH named button row ───────────────────────────────────────────
+
+    def _build_clip_length_row(self) -> Gtk.Box:
+        """CLIP LENGTH row — output video duration, model-specific frame counts.
+
+        Shows Short/Standard/Long/Extended slot buttons for wan2 and skyreels.
+        For mochi (fixed frames), shows a single disabled locked button labelled
+        "7.0 s · 168 f  (fixed)".
+        Hidden entirely when the source is "image".
+        """
+        from generation_config import CLIP_SLOTS, clip_label, MODELS_WITH_FIXED_FRAMES
+
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+
+        lbl = Gtk.Label(label="CLIP LENGTH  \u2014  output video is")
+        lbl.add_css_class("create-zone-label")
+        lbl.set_xalign(0)
+        outer.append(lbl)
+
+        self._clip_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        self._clip_row.add_css_class("named-ctrl-row")
+
+        # ── Mochi locked button ───────────────────────────────────────────────
+        # Shown only when mochi is the active model; disabled because mochi
+        # hard-codes 168 frames and ignores num_frames in the request.
+        self._clip_mochi_btn = Gtk.ToggleButton()
+        self._clip_mochi_btn.set_active(True)
+        self._clip_mochi_btn.set_sensitive(False)
+        _mochi_inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        _mochi_inner.set_halign(Gtk.Align.CENTER)
+        _mochi_inner.append(Gtk.Label(label="7.0 s \u00b7 168 f  (fixed)"))
+        self._clip_mochi_btn.set_child(_mochi_inner)
+        self._clip_mochi_btn.add_css_class("named-ctrl-btn")
+        self._clip_mochi_btn.set_hexpand(True)
+        self._clip_mochi_btn.set_visible(False)  # revealed only for fixed-frame models
+        self._clip_row.append(self._clip_mochi_btn)
+
+        # ── Normal slot buttons (wan2 / skyreels) ─────────────────────────────
+        # Four ToggleButtons in a radio group: Short / Standard / Long / Extended.
+        # Labels are rebuilt by _refresh_clip_labels() whenever the video model changes.
+        self._clip_btns: list = []
+        first_btn = None
+        current_slot = str(_settings.get("clip_length_slot") or "standard")
+
+        for slot in CLIP_SLOTS:
+            btn = Gtk.ToggleButton()
+            # Store the slot identifier as a plain Python attribute (GTK set_data is blocked).
+            btn.slot_value = slot
+            btn.add_css_class("named-ctrl-btn")
+            btn.set_hexpand(True)
+            if first_btn is None:
+                first_btn = btn
+            else:
+                # GTK radio group: set_group links buttons so only one is active.
+                btn.set_group(first_btn)
+            if slot == current_slot:
+                btn.set_active(True)
+            btn.connect("toggled", self._on_clip_btn_toggled)
+            self._clip_row.append(btn)
+            self._clip_btns.append(btn)
+
+        outer.append(self._clip_row)
+
+        # Populate button labels based on the current video model.
+        self._refresh_clip_labels()
+        return outer
+
+    def _on_clip_btn_toggled(self, btn: Gtk.ToggleButton) -> None:
+        """Persist the selected clip length slot when a button is toggled active."""
+        if not btn.get_active():
+            # Ignore the deactivation signal from the previously selected button;
+            # only act on the newly activated one.
+            return
+        _settings.set("clip_length_slot", btn.slot_value)
+
+    def _refresh_clip_labels(self) -> None:
+        """Update CLIP LENGTH button sublabels for the current video model.
+
+        Called at build time and whenever the active video model changes via
+        _set_model(). Shows the mochi locked button for fixed-frame models and
+        shows the normal slot buttons (with model-specific duration labels) for
+        all others.
+        """
+        from generation_config import CLIP_SLOTS, clip_label, MODELS_WITH_FIXED_FRAMES
+
+        if not hasattr(self, "_clip_btns"):
+            # Called before _build_clip_length_row() has run — skip safely.
+            return
+
+        model_key = self._video_model  # "wan2" | "mochi" | "skyreels"
+        is_fixed = model_key in MODELS_WITH_FIXED_FRAMES
+
+        # Toggle mochi locked button vs normal slot buttons.
+        self._clip_mochi_btn.set_visible(is_fixed)
+        for btn in self._clip_btns:
+            btn.set_visible(not is_fixed)
+
+        if not is_fixed:
+            # Rebuild each slot button's inner label box with the correct
+            # model-specific duration string (e.g. "3.4 s · 81 f" for wan2 standard).
+            for btn, slot in zip(self._clip_btns, CLIP_SLOTS):
+                slot_display = slot.capitalize()
+                sublabel = clip_label(model_key, slot)
+                inner_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+                inner_box.set_halign(Gtk.Align.CENTER)
+                inner_box.append(Gtk.Label(label=slot_display))
+                sub = Gtk.Label(label=sublabel)
+                sub.add_css_class("named-ctrl-sub")
+                inner_box.append(sub)
+                btn.set_child(inner_box)
 
     # ── Servers popover ────────────────────────────────────────────────────────
 
@@ -3537,6 +3654,11 @@ class ControlPanel(Gtk.Box):
         # Animate inputs: visible only in animate mode
         self._animate_box.set_visible(is_animate)
 
+        # CLIP LENGTH row: hidden for image source (frame count is not a meaningful
+        # concept for still image generation). Shown for video and animate sources.
+        if hasattr(self, "_clip_length_row_widget"):
+            self._clip_length_row_widget.set_visible(is_video or is_animate)
+
         # QUALITY row: only shown for video/animate sources where step count is meaningful.
         # Image (FLUX) uses its own separate step range and the row would be misleading.
         if hasattr(self, "_quality_row_widget"):
@@ -3606,6 +3728,11 @@ class ControlPanel(Gtk.Box):
                 )
         elif self._model_source == "image":
             self._image_model = model
+
+        # Refresh CLIP LENGTH button labels whenever the active model changes so
+        # durations shown reflect the newly selected model (wan2 vs skyreels fps/frames).
+        if hasattr(self, "_clip_btns"):
+            self._refresh_clip_labels()
 
     def get_model_source(self) -> str:
         return self._model_source
