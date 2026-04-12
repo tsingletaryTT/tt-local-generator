@@ -513,6 +513,40 @@ scrollbar slider:hover {
     margin-bottom: 1px;
 }
 
+/* -- SHOT panel -------------------------------------------------------------- */
+.shot-panel {
+    border: 1px solid alpha(@borders, 0.5);
+    border-radius: 6px;
+    padding: 6px 8px;
+    margin-top: 4px;
+    margin-bottom: 2px;
+}
+.model-badge-label {
+    font-size: 0.8em;
+    font-weight: bold;
+}
+.model-badge-sub {
+    font-size: 0.75em;
+    opacity: 0.6;
+}
+.shot-switcher-btn {
+    font-size: 0.72em;
+    padding: 2px 6px;
+    border-radius: 10px;
+}
+.seed-btn {
+    min-width: 0;
+    padding: 4px 4px;
+    border-radius: 0;
+    font-size: 0.78em;
+}
+.seed-btn:first-child { border-radius: 5px 0 0 5px; }
+.seed-btn:last-child  { border-radius: 0 5px 5px 0; }
+.seed-btn:checked,
+.seed-btn.active      { background: alpha(#ec96b8, 0.18);
+                        color: #ec96b8;
+                        border-color: #ec96b8; }
+
 /* -- Advanced accordion ---------------------------------------------------- */
 .adv-hdr-btn {
     background: @tt_bg_darkest;
@@ -2223,6 +2257,12 @@ class ControlPanel(Gtk.Box):
         self._prompt_gen_starting: bool = False   # True while start_prompt_gen.sh is running
         self._prompt_gen_generating: bool = False # True while waiting for generate_prompt()
         self._confirm_box_visible: bool = False   # True while inline confirm box is shown
+        # ── SHOT panel server state ───────────────────────────────────────────
+        # Tracks which video model server is detected as running so the SHOT
+        # panel badge can display accurate status without querying the server
+        # again on every render.
+        self._shot_server_ready: bool = False
+        self._shot_alt_model_key: "str | None" = None
         # Source + seed captured at click time for auto-generate after server starts
         self._inspire_pending_source: "str | None" = None
         self._inspire_pending_seed: str = ""
@@ -2494,6 +2534,13 @@ class ControlPanel(Gtk.Box):
         # ── QUALITY row ───────────────────────────────────────────────────────
         self._quality_row_widget = self._build_quality_row()
         self.append(self._quality_row_widget)
+
+        # ── SHOT panel ────────────────────────────────────────────────────────
+        # Shows active model badge, optional switcher hint, and seed variation.
+        # Placed after QUALITY so the create zone order is:
+        #   chips → CLIP LENGTH → QUALITY → SHOT → Advanced accordion
+        self._shot_panel_widget = self._build_shot_panel()
+        self.append(self._shot_panel_widget)
 
         # ── Advanced settings accordion ───────────────────────────────────────
         # Note: self.append(self._animate_box) is deferred until after
@@ -3095,6 +3142,223 @@ class ControlPanel(Gtk.Box):
                 sub.add_css_class("named-ctrl-sub")
                 inner_box.append(sub)
                 btn.set_child(inner_box)
+
+    # ── SHOT panel ─────────────────────────────────────────────────────────────
+
+    def _build_shot_panel(self) -> Gtk.Box:
+        """SHOT panel: model badge + optional switcher + seed variation row.
+
+        Model badge shows the auto-detected active video server with a status
+        dot (green when ready, grey when offline).  When a second compatible
+        video server is detected the switcher hint button appears so the user
+        can hop to it with one click.
+
+        The seed variation buttons replace the raw integer seed field from
+        Advanced settings:
+          • 🎲 New idea   — seed=-1 (full randomness each run)
+          • 🔁 Repeat last — re-use the seed from the most recent completed job
+          • 📌 Keep this  — pin the current seed across all runs
+        """
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+
+        lbl = Gtk.Label(label="SHOT")
+        lbl.add_css_class("create-zone-label")
+        lbl.set_xalign(0)
+        outer.append(lbl)
+
+        panel = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
+        panel.add_css_class("shot-panel")
+
+        # ── Model row ──────────────────────────────────────────────────────────
+        model_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+
+        self._shot_model_lbl = Gtk.Label()
+        self._shot_model_lbl.add_css_class("model-badge-label")
+        self._shot_model_lbl.set_xalign(0)
+        model_row.append(self._shot_model_lbl)
+
+        self._shot_model_sub = Gtk.Label()
+        self._shot_model_sub.add_css_class("model-badge-sub")
+        self._shot_model_sub.set_xalign(0)
+        model_row.append(self._shot_model_sub)
+
+        _spacer = Gtk.Box()
+        _spacer.set_hexpand(True)
+        model_row.append(_spacer)
+
+        # Switcher hint — shown only when an alternate video model server is ready.
+        # In the current single-endpoint architecture this will be hidden unless
+        # future multi-server polling is wired in.
+        self._shot_switcher_btn = Gtk.Button()
+        self._shot_switcher_btn.add_css_class("shot-switcher-btn")
+        self._shot_switcher_btn.set_visible(False)
+        self._shot_switcher_btn.connect("clicked", self._on_shot_switcher_clicked)
+        model_row.append(self._shot_switcher_btn)
+
+        panel.append(model_row)
+
+        # ── Seed variation row ─────────────────────────────────────────────────
+        seed_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+
+        self._seed_random_btn = Gtk.ToggleButton(label="\U0001f3b2 New idea")
+        self._seed_random_btn.add_css_class("seed-btn")
+        self._seed_random_btn.set_hexpand(True)
+        self._seed_random_btn.set_tooltip_text("Use a different random seed every time")
+
+        self._seed_repeat_btn = Gtk.ToggleButton(label="\U0001f501 Repeat last")
+        self._seed_repeat_btn.add_css_class("seed-btn")
+        self._seed_repeat_btn.set_hexpand(True)
+        self._seed_repeat_btn.set_tooltip_text("Re-use the seed from the most recent generation")
+        self._seed_repeat_btn.set_group(self._seed_random_btn)
+
+        self._seed_keep_btn = Gtk.ToggleButton(label="\U0001f4cc Keep this")
+        self._seed_keep_btn.add_css_class("seed-btn")
+        self._seed_keep_btn.set_hexpand(True)
+        self._seed_keep_btn.set_tooltip_text("Pin the current seed value across all generations")
+        self._seed_keep_btn.set_group(self._seed_random_btn)
+
+        # Use _m=mode default-arg pattern to capture the loop variable correctly
+        self._seed_random_btn.connect(
+            "toggled", lambda b, _m="random": b.get_active() and self._on_seed_mode(_m)
+        )
+        self._seed_repeat_btn.connect(
+            "toggled", lambda b, _m="repeat": b.get_active() and self._on_seed_mode(_m)
+        )
+        self._seed_keep_btn.connect(
+            "toggled", lambda b, _m="keep": b.get_active() and self._on_seed_mode(_m)
+        )
+
+        seed_row.append(self._seed_random_btn)
+        seed_row.append(self._seed_repeat_btn)
+        seed_row.append(self._seed_keep_btn)
+        panel.append(seed_row)
+
+        outer.append(panel)
+
+        # Initialise button state from saved settings immediately after the
+        # widgets exist (store may not be wired yet; _get_history_records guards).
+        self._apply_seed_mode_from_settings()
+        return outer
+
+    def _apply_seed_mode_from_settings(self) -> None:
+        """Set seed variation button state and self._seed from saved settings.
+
+        Falls back to random if "repeat" is requested but history is empty,
+        since there is no last seed to repeat.
+        """
+        if not hasattr(self, "_seed_random_btn"):
+            return
+        mode = str(_settings.get("seed_mode") or "random")
+        recs = self._get_history_records()
+
+        if mode == "repeat" and recs:
+            last_seed = getattr(
+                sorted(recs, key=lambda r: getattr(r, "created_at", ""))[-1],
+                "seed", -1,
+            )
+            self._seed = int(last_seed) if last_seed is not None else -1
+            self._seed_repeat_btn.set_active(True)
+        elif mode == "keep":
+            self._seed = int(_settings.get("pinned_seed") or -1)
+            self._seed_keep_btn.set_active(True)
+            if self._seed != -1:
+                self._seed_keep_btn.set_label(f"\U0001f4cc {self._seed}")
+        else:
+            # Default: random (also the fallback when repeat has no history)
+            self._seed = -1
+            self._seed_random_btn.set_active(True)
+
+        # "Repeat last" is only meaningful when there is at least one completed job
+        self._seed_repeat_btn.set_sensitive(bool(recs))
+
+    def _get_history_records(self) -> list:
+        """Return all history records, or empty list if store not yet initialised.
+
+        Called at build time (before MainWindow wires self._store) so the guard
+        is essential — returning [] causes _apply_seed_mode_from_settings to
+        fall back to random, which is the safe default.
+        """
+        try:
+            store = getattr(self, "_store", None)
+            if store is not None:
+                return store.all_records()
+        except Exception:
+            pass
+        return []
+
+    def _on_seed_mode(self, mode: str) -> None:
+        """Handle seed variation toggle selection.
+
+        Updates self._seed (the integer forwarded to the inference server) and
+        persists the chosen mode to settings so it survives restarts.
+        """
+        _settings.set("seed_mode", mode)
+        if mode == "random":
+            self._seed = -1
+        elif mode == "repeat":
+            recs = self._get_history_records()
+            if recs:
+                last = sorted(recs, key=lambda r: getattr(r, "created_at", ""))[-1]
+                self._seed = int(getattr(last, "seed", -1) or -1)
+            else:
+                # No history yet — fall back to random silently
+                self._seed = -1
+        elif mode == "keep":
+            pinned = int(_settings.get("pinned_seed") or -1)
+            if pinned == -1:
+                # No pinned seed yet — pin whatever seed is currently active
+                pinned = self._seed if self._seed != -1 else -1
+            self._seed = pinned
+            _settings.set("pinned_seed", self._seed)
+            if hasattr(self, "_seed_keep_btn"):
+                self._seed_keep_btn.set_label(
+                    f"\U0001f4cc {self._seed}" if self._seed != -1 else "\U0001f4cc Keep this"
+                )
+
+    def _on_shot_switcher_clicked(self, _btn: Gtk.Button) -> None:
+        """Switch to the alternate ready video model without restarting anything."""
+        alt = getattr(self, "_shot_alt_model_key", None)
+        if alt:
+            self._set_model(alt)
+            _settings.set("preferred_video_model", alt)
+            self.update_shot_panel()
+
+    def update_shot_panel(self) -> None:
+        """Refresh the model badge label and switcher hint button.
+
+        Called from the main thread — safe to touch widgets directly.
+        Reads self._shot_server_ready and self._shot_alt_model_key which are
+        written by MainWindow._on_health_result before this is invoked.
+        """
+        if not hasattr(self, "_shot_model_lbl"):
+            return
+
+        # Human-readable display info keyed by internal video model key
+        _DISPLAY = {
+            "wan2":     ("\u25cf Wan2.2",   "720p"),
+            "mochi":    ("\u25cf Mochi-1",  "480\u00d7848"),
+            "skyreels": ("\u25cf SkyReels", "480\u00d7272"),
+        }
+        _OFFLINE = "\u25cb No server \u00b7 Start one \u203a"
+
+        if not self._shot_server_ready:
+            self._shot_model_lbl.set_label(_OFFLINE)
+            self._shot_model_sub.set_label("")
+            self._shot_switcher_btn.set_visible(False)
+            return
+
+        model_key = self._video_model
+        name, res = _DISPLAY.get(model_key, (f"\u25cf {model_key}", ""))
+        self._shot_model_lbl.set_label(name)
+        self._shot_model_sub.set_label(res)
+
+        alt_key = self._shot_alt_model_key
+        if alt_key:
+            alt_name = _DISPLAY.get(alt_key, (alt_key,))[0].lstrip("\u25cf").strip()
+            self._shot_switcher_btn.set_label(f"{alt_name} also ready \u203a")
+            self._shot_switcher_btn.set_visible(True)
+        else:
+            self._shot_switcher_btn.set_visible(False)
 
     # ── Servers popover ────────────────────────────────────────────────────────
 
@@ -5969,6 +6233,25 @@ class MainWindow(Gtk.ApplicationWindow):
                     self._log_tail_stop = None
                 if not (self._worker_gen and self._worker_gen._running()):
                     self._set_status("Server ready — enter a prompt and click Generate")
+
+            # ── Update SHOT panel model badge ─────────────────────────────────
+            # Derive the internal video model key from the server-reported model
+            # ID so the badge always shows what is actually running.
+            if hasattr(self._controls, "update_shot_panel"):
+                video_key = _MODEL_TO_VIDEO_KEY.get(running_model or "") if running_model else None
+                self._controls._shot_server_ready = bool(ready and video_key)
+                if video_key and ready:
+                    # Honour the user's preferred model setting; auto-switch to
+                    # the running model if it differs from what is selected.
+                    pref = str(_settings.get("preferred_video_model") or "")
+                    if pref and pref == video_key:
+                        self._controls._set_model(pref)
+                    elif video_key != self._controls._video_model:
+                        self._controls._set_model(video_key)
+                # No multi-server support in the current architecture, so the
+                # switcher hint is never populated (alt model stays None).
+                self._controls._shot_alt_model_key = None
+                self._controls.update_shot_panel()
         except Exception as exc:
             import traceback
             print(f"[health] _on_health_result error: {exc}", flush=True)
