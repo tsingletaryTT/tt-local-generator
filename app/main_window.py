@@ -5301,30 +5301,8 @@ class PreferencesDialog(Gtk.Window):
         # ── Generation ────────────────────────────────────────────────────────
         box.append(self._section("Generation"))
 
-        # Quality preset: radio buttons via Gtk.CheckButton.set_group()
-        quality_lbl = Gtk.Label(label="Default quality:")
-        quality_lbl.set_xalign(0)
-        box.append(quality_lbl)
-
-        q_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        q_row.set_margin_start(8)
-        current_steps = int(_settings.get("quality_steps"))
-        self._quality_btns: list[Gtk.CheckButton] = []
-        first_qbtn = None
-        for label, steps in [("Fast (10)", 10), ("Standard (30)", 30),
-                              ("High Quality (40)", 40)]:
-            btn = Gtk.CheckButton(label=label)
-            btn.steps_value = steps
-            if first_qbtn is None:
-                first_qbtn = btn
-            else:
-                btn.set_group(first_qbtn)
-            if steps == current_steps:
-                btn.set_active(True)
-            btn.connect("toggled", self._on_quality_toggled)
-            q_row.append(btn)
-            self._quality_btns.append(btn)
-        box.append(q_row)
+        # Note: quality preset and clip length are now controlled by the QUALITY
+        # and CLIP LENGTH button rows in the main panel.
 
         # Sleep after N completions
         sleep_spin = Gtk.SpinButton()
@@ -5450,39 +5428,6 @@ class PreferencesDialog(Gtk.Window):
                              "'Random' samples from the full list based on the probability above."))
         self._director_drop = director_drop
 
-        # ── SkyReels ──────────────────────────────────────────────────────────
-        box.append(self._section("SkyReels"))
-
-        # Video duration selector (frame count).
-        # Valid SkyReels counts: (N-1) % 4 == 0  →  9, 13, 17, 21, 25, 29, 33, 65, 97, ...
-        skyreels_durations = [
-            ("9 frames  (0.4 s  — fast test)", 9),
-            ("33 frames (1.4 s  — default)", 33),
-            ("65 frames (2.7 s  — longer)", 65),
-            ("97 frames (4.0 s  — cinematic)", 97),
-        ]
-        sr_frames_model = Gtk.StringList()
-        for label, _ in skyreels_durations:
-            sr_frames_model.append(label)
-        sr_frames_drop = Gtk.DropDown(model=sr_frames_model)
-        sr_frames_drop.set_size_request(230, -1)
-        current_frames = int(_settings.get("skyreels_num_frames") or 33)
-        for i, (_, frames) in enumerate(skyreels_durations):
-            if frames == current_frames:
-                sr_frames_drop.set_selected(i)
-                break
-        def _on_sr_frames_changed(drop, _param, durations=skyreels_durations):
-            idx = drop.get_selected()
-            if 0 <= idx < len(durations):
-                _settings.set("skyreels_num_frames", durations[idx][1])
-        sr_frames_drop.connect("notify::selected", _on_sr_frames_changed)
-        box.append(self._row(
-            "Video duration (SkyReels):", sr_frames_drop,
-            "Number of frames to generate per SkyReels job.\n"
-            "Longer clips take proportionally longer to generate.\n"
-            "Valid counts: (N-1) % 4 == 0  →  9, 13, 17, 21, 25, 29, 33, 65, 97…"
-        ))
-
         # ── Servers ───────────────────────────────────────────────────────────
         box.append(self._section("Servers"))
 
@@ -5577,18 +5522,6 @@ class PreferencesDialog(Gtk.Window):
         parent.append(path_lbl)
 
     # ── Change handlers ────────────────────────────────────────────────────────
-
-    def _on_quality_toggled(self, btn: Gtk.CheckButton) -> None:
-        if not btn.get_active():
-            return
-        steps = btn.steps_value
-        _settings.set("quality_steps", steps)
-        # Update panel state and QUALITY row buttons; sync Advanced dialog if open.
-        self._mw._controls.sync_quality_btn_to_steps(steps)
-        # Keep menu action state in sync
-        action = self._mw.lookup_action("quality")
-        if action:
-            action.set_state(GLib.Variant("s", str(steps)))
 
     def _on_dir_prob_toggled(self, btn: Gtk.CheckButton) -> None:
         if not btn.get_active():
@@ -6758,11 +6691,15 @@ class MainWindow(Gtk.ApplicationWindow):
                 model_id or self._controls.get_video_model(), "wan2.2-t2v"
             )
             self._set_status(f"Submitting {model_name} video generation job…")
-            # Pass num_frames for SkyReels (configurable via Preferences → SkyReels).
-            # Other models ignore num_frames (it's None by default).
+            # Resolve num_frames from the CLIP LENGTH slot setting.
+            # Models in MODELS_WITH_FIXED_FRAMES hard-code their frame count in the
+            # runner and ignore num_frames — pass None so the worker uses its default.
+            from generation_config import clip_frames, MODELS_WITH_FIXED_FRAMES
             num_frames_arg: "int | None" = None
-            if model_name == "skyreels-v2-1.3b-540p":
-                num_frames_arg = int(_settings.get("skyreels_num_frames") or 33)
+            video_model_key = self._controls.get_video_model()  # "wan2" | "mochi" | "skyreels"
+            slot = str(_settings.get("clip_length_slot") or "standard")
+            if video_model_key not in MODELS_WITH_FIXED_FRAMES:
+                num_frames_arg = clip_frames(video_model_key, slot)
             gen = GenerationWorker(
                 client=self._client,
                 store=self._store,
