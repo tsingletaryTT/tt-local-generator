@@ -9,9 +9,7 @@ import importlib.util
 import json
 import sys
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
-
-import pytest
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "app"))
 
@@ -70,7 +68,8 @@ def test_generate_queue_only_adds_items_does_not_run(monkeypatch, tmp_path):
 
     fake_result = {"prompt": "a red fox trots", "type": "video", "source": "algo", "slug": "a red fox trots"}
 
-    with patch.object(tt_ctl.gp, "generate", return_value=fake_result), \
+    with patch.object(tt_ctl.gp, "_llm_available", return_value=False), \
+         patch.object(tt_ctl.gp, "generate", return_value=fake_result), \
          patch.object(tt_ctl, "cmd_queue_run") as mock_run:
         tt_ctl.cmd_generate(_make_args(count=2, queue_only=True))
 
@@ -86,7 +85,8 @@ def test_generate_without_queue_only_calls_cmd_queue_run(monkeypatch, tmp_path):
 
     fake_result = {"prompt": "misty cliffs", "type": "video", "source": "algo", "slug": "misty cliffs"}
 
-    with patch.object(tt_ctl.gp, "generate", return_value=fake_result), \
+    with patch.object(tt_ctl.gp, "_llm_available", return_value=False), \
+         patch.object(tt_ctl.gp, "generate", return_value=fake_result), \
          patch.object(tt_ctl, "cmd_queue_run") as mock_run:
         tt_ctl.cmd_generate(_make_args(count=1, queue_only=False))
 
@@ -102,7 +102,8 @@ def test_generate_explicit_seed_increments_per_item(monkeypatch, tmp_path):
 
     fake_result = {"prompt": "ocean waves", "type": "video", "source": "algo", "slug": "ocean waves"}
 
-    with patch.object(tt_ctl.gp, "generate", return_value=fake_result), \
+    with patch.object(tt_ctl.gp, "_llm_available", return_value=False), \
+         patch.object(tt_ctl.gp, "generate", return_value=fake_result), \
          patch.object(tt_ctl, "cmd_queue_run"):
         tt_ctl.cmd_generate(_make_args(count=3, seed=100))
 
@@ -117,7 +118,8 @@ def test_generate_random_seed_stays_minus_one(monkeypatch, tmp_path):
 
     fake_result = {"prompt": "x", "type": "video", "source": "algo", "slug": "x"}
 
-    with patch.object(tt_ctl.gp, "generate", return_value=fake_result), \
+    with patch.object(tt_ctl.gp, "_llm_available", return_value=False), \
+         patch.object(tt_ctl.gp, "generate", return_value=fake_result), \
          patch.object(tt_ctl, "cmd_queue_run"):
         tt_ctl.cmd_generate(_make_args(count=3, seed=-1))
 
@@ -133,7 +135,8 @@ def test_generate_with_guide_calls_guided_generate(monkeypatch, tmp_path):
 
     guided_result = {"prompt": "volcano at dusk", "type": "video", "source": "llm", "slug": "volcano theme"}
 
-    with patch.object(tt_ctl.gp, "guided_generate", return_value=guided_result) as mock_guided, \
+    with patch.object(tt_ctl.gp, "_llm_available", return_value=False), \
+         patch.object(tt_ctl.gp, "guided_generate", return_value=guided_result) as mock_guided, \
          patch.object(tt_ctl.gp, "generate") as mock_free, \
          patch.object(tt_ctl, "cmd_queue_run"):
         tt_ctl.cmd_generate(_make_args(count=2, guide="volcano theme"))
@@ -150,7 +153,8 @@ def test_generate_without_guide_calls_generate(monkeypatch, tmp_path):
 
     free_result = {"prompt": "a fox in snow", "type": "video", "source": "algo", "slug": "..."}
 
-    with patch.object(tt_ctl.gp, "generate", return_value=free_result) as mock_free, \
+    with patch.object(tt_ctl.gp, "_llm_available", return_value=False), \
+         patch.object(tt_ctl.gp, "generate", return_value=free_result) as mock_free, \
          patch.object(tt_ctl.gp, "guided_generate") as mock_guided, \
          patch.object(tt_ctl, "cmd_queue_run"):
         tt_ctl.cmd_generate(_make_args(count=1, guide=None))
@@ -182,7 +186,8 @@ def test_generate_sets_model_source_from_type(monkeypatch, tmp_path):
 
     skyreels_result = {"prompt": "crater lake", "type": "skyreels", "source": "algo", "slug": "crater lake"}
 
-    with patch.object(tt_ctl.gp, "generate", return_value=skyreels_result), \
+    with patch.object(tt_ctl.gp, "_llm_available", return_value=False), \
+         patch.object(tt_ctl.gp, "generate", return_value=skyreels_result), \
          patch.object(tt_ctl, "cmd_queue_run"):
         tt_ctl.cmd_generate(_make_args(count=1, prompt_type="skyreels"))
 
@@ -205,7 +210,8 @@ def test_generate_appends_to_existing_queue(monkeypatch, tmp_path):
 
     new_result = {"prompt": "new item", "type": "video", "source": "algo", "slug": "new item"}
 
-    with patch.object(tt_ctl.gp, "generate", return_value=new_result), \
+    with patch.object(tt_ctl.gp, "_llm_available", return_value=False), \
+         patch.object(tt_ctl.gp, "generate", return_value=new_result), \
          patch.object(tt_ctl, "cmd_queue_run"):
         tt_ctl.cmd_generate(_make_args(count=1, queue_only=True))
 

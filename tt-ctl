@@ -392,6 +392,12 @@ def cmd_queue_run(args):
             skipped_items.append(item)
             continue
 
+        if src not in _MODEL_FOR_SRC:
+            print(yellow(f"    ! Unknown model_source '{src}' — skipping (item stays in queue)"))
+            n_skipped += 1
+            skipped_items.append(item)
+            continue
+
         worker = _make_worker_for_item(client, store, item)
 
         done   = threading.Event()
