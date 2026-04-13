@@ -458,6 +458,79 @@ def cmd_queue_run(args):
     print("  " + "  ".join(parts) if parts else dim("  Nothing ran."))
 
 
+# ── generate ──────────────────────────────────────────────────────────────────
+
+def cmd_generate(args):
+    """
+    Generate N prompts (optionally guided by a theme) and run them through the queue.
+
+    Prompts are written to queue.json first, then cmd_queue_run drains the queue
+    unless --queue-only is set.  With an explicit --seed S and --count N, seeds
+    are assigned as S, S+1, S+2, … so each generation gets a unique seed while
+    still being reproducible when re-run with the same starting seed.
+    """
+    guide      = getattr(args, "guide", None)
+    count      = getattr(args, "count", 1)
+    ptype      = getattr(args, "type", "video")
+    mode       = getattr(args, "mode", "algo")
+    enhance    = not getattr(args, "no_enhance", False)
+    steps      = getattr(args, "steps", 30)
+    seed       = getattr(args, "seed", -1)
+    queue_only = getattr(args, "queue_only", False)
+
+    store          = HistoryStore()
+    existing_queue = store.load_queue()
+
+    # Warn once at the start if LLM polish / guided generation was requested but
+    # the Qwen server is not available, so the user knows the fallback is active.
+    if enhance:
+        if not gp._llm_available():
+            print(yellow("  Qwen server offline — algo fallback active"))
+
+    print(bold(f"Generating {count} prompt{'s' if count != 1 else ''}…"))
+
+    new_items = []
+    for i in range(count):
+        # Explicit seed: each item gets seed+i so runs are unique yet reproducible.
+        # Random seed (-1): all items keep -1 so the server picks a random seed
+        # independently for each generation.
+        item_seed = (seed + i) if seed >= 0 else -1
+
+        if guide:
+            result = gp.guided_generate(guide, ptype, enhance=enhance)
+        else:
+            result = gp.generate(prompt_type=ptype, mode=mode, enhance=enhance)
+
+        prompt = result["prompt"]
+        source = result["source"]
+        short  = prompt[:70] + ("…" if len(prompt) > 70 else "")
+        print(f"  {dim(f'[{i+1}/{count}]')} {dim(source)}  {short}")
+
+        new_items.append({
+            "prompt":          prompt,
+            "negative_prompt": "",
+            "steps":           steps,
+            "seed":            item_seed,
+            "seed_image_path": "",
+            "model_source":    ptype,
+            "guidance_scale":  5.0,
+            "ref_video_path":  "",
+            "ref_char_path":   "",
+            "animate_mode":    "animation",
+            "model_id":        "",
+            "job_id_override": "",
+        })
+
+    store.save_queue(existing_queue + new_items)
+    print(green("✓") + f"  {count} item{'s' if count != 1 else ''} added to queue")
+
+    if queue_only:
+        print(dim("  Run: tt-ctl queue run   to start generation"))
+        return
+
+    cmd_queue_run(args)
+
+
 # ── history ───────────────────────────────────────────────────────────────────
 
 def cmd_history(args):
@@ -710,6 +783,42 @@ def _build_parser() -> argparse.ArgumentParser:
     r.add_argument("--model", default="video",
                    choices=["video", "image", "animate", "skyreels", "mochi"])
 
+    # generate
+    gen = sub.add_parser(
+        "generate",
+        help="Generate prompts (optionally guided) and run them",
+    )
+    gen.add_argument(
+        "guide", nargs="?", default=None, metavar="GUIDE",
+        help="Optional guiding theme — Qwen generates around it if available",
+    )
+    gen.add_argument("--count", type=int, default=1, metavar="N",
+                     help="Number of prompts to generate (default: 1)")
+    gen.add_argument(
+        "--type", default="video",
+        choices=["video", "image", "skyreels", "animate"],
+        metavar="TYPE",
+        help="Model type: video|image|skyreels|animate (default: video)",
+    )
+    gen.add_argument(
+        "--mode", default="algo", choices=["algo", "markov"],
+        help="Base generation mode (default: algo; ignored when GUIDE + Qwen up)",
+    )
+    gen.add_argument(
+        "--no-enhance", action="store_true",
+        help="Skip Qwen polish / guided generation even if server is up",
+    )
+    gen.add_argument("--steps", type=int, default=30,
+                     help="Inference steps per generation (default: 30)")
+    gen.add_argument("--seed", type=int, default=-1,
+                     help="Starting seed (-1 = random). With --count N, seeds are S, S+1, …")
+    gen.add_argument("--queue-only", action="store_true",
+                     help="Stage prompts in queue.json but do not run them")
+    gen.add_argument("--server", default="http://localhost:8000",
+                     help="Inference server URL (default: http://localhost:8000)")
+    gen.add_argument("--dry-run", action="store_true",
+                     help="Preview queued items without executing")
+
     return p
 
 
@@ -722,16 +831,17 @@ def main():
         return
 
     dispatch = {
-        "status":  cmd_status,
-        "servers": cmd_servers,
-        "start":   cmd_start,
-        "stop":    cmd_stop,
-        "restart": cmd_restart,
-        "queue":   cmd_queue,
-        "history": cmd_history,
-        "server":  cmd_server,
-        "recover": cmd_recover,
-        "run":     cmd_run,
+        "status":   cmd_status,
+        "servers":  cmd_servers,
+        "start":    cmd_start,
+        "stop":     cmd_stop,
+        "restart":  cmd_restart,
+        "queue":    cmd_queue,
+        "history":  cmd_history,
+        "server":   cmd_server,
+        "recover":  cmd_recover,
+        "run":      cmd_run,
+        "generate": cmd_generate,
     }
     dispatch[args.cmd](args)
 
