@@ -2877,6 +2877,91 @@ class ControlPanel(Gtk.Box):
         mode_row.append(self._anim_mode_repl_btn)
         self._animate_box.append(mode_row)
 
+        # ── Mode description bar ───────────────────────────────────────────────
+        # Slides down below the toggle on hover; stays anchored, never floats.
+        self._mode_desc_revealer = Gtk.Revealer()
+        self._mode_desc_revealer.set_transition_type(
+            Gtk.RevealerTransitionType.SLIDE_DOWN
+        )
+        self._mode_desc_revealer.set_transition_duration(120)
+
+        self._mode_desc_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self._mode_desc_bar.add_css_class("mode-desc-bar")
+
+        self._mode_desc_icon = Gtk.Label(label="💃")
+        self._mode_desc_icon.add_css_class("mode-desc-bar-icon")
+        self._mode_desc_icon.set_valign(Gtk.Align.START)
+
+        desc_text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        self._mode_desc_text = Gtk.Label(label="")
+        self._mode_desc_text.add_css_class("mode-desc-bar-text")
+        self._mode_desc_text.set_xalign(0)
+        self._mode_desc_text.set_wrap(True)
+        self._mode_desc_text.set_hexpand(True)
+        self._mode_desc_impact = Gtk.Label(label="")
+        self._mode_desc_impact.set_xalign(0)
+        self._mode_desc_impact.set_wrap(True)
+        desc_text_box.append(self._mode_desc_text)
+        desc_text_box.append(self._mode_desc_impact)
+
+        self._mode_desc_bar.append(self._mode_desc_icon)
+        self._mode_desc_bar.append(desc_text_box)
+        self._mode_desc_revealer.set_child(self._mode_desc_bar)
+        self._animate_box.append(self._mode_desc_revealer)
+
+        # ── Hover wiring for mode description bar ─────────────────────────────
+        # 200 ms leave delay prevents the bar from flashing when moving between
+        # the Animation and Replacement buttons.
+        self._mode_desc_leave_timer: "int | None" = None
+
+        _ANIM_ICON   = "💃"
+        _ANIM_TEXT   = (
+            "Your character performs the motion from the reference video. "
+            "Their appearance is preserved; only the movement is transferred."
+        )
+        _ANIM_IMPACT = "↳ Reference video sets the motion · Character appearance comes from your image"
+
+        _REPL_ICON   = "🔀"
+        _REPL_TEXT   = (
+            "Your character replaces the person in the reference video. "
+            "Motion, background, and timing come from the reference."
+        )
+        _REPL_IMPACT = "↳ Needs a visible person in the reference video · Background is preserved"
+
+        def _show_mode_desc(icon: str, text: str, impact: str, css_variant: str) -> None:
+            if self._mode_desc_leave_timer is not None:
+                GLib.source_remove(self._mode_desc_leave_timer)
+                self._mode_desc_leave_timer = None
+            self._mode_desc_icon.set_label(icon)
+            self._mode_desc_text.set_label(text)
+            self._mode_desc_impact.set_label(impact)
+            self._mode_desc_bar.remove_css_class("mode-desc-bar-anim")
+            self._mode_desc_bar.remove_css_class("mode-desc-bar-repl")
+            self._mode_desc_bar.add_css_class(f"mode-desc-bar-{css_variant}")
+            self._mode_desc_impact.remove_css_class("mode-desc-bar-impact-anim")
+            self._mode_desc_impact.remove_css_class("mode-desc-bar-impact-repl")
+            self._mode_desc_impact.add_css_class(f"mode-desc-bar-impact-{css_variant}")
+            self._mode_desc_revealer.set_reveal_child(True)
+
+        def _hide_mode_desc_delayed() -> None:
+            def _do_hide() -> bool:
+                self._mode_desc_revealer.set_reveal_child(False)
+                self._mode_desc_leave_timer = None
+                return GLib.SOURCE_REMOVE
+            if self._mode_desc_leave_timer is not None:
+                GLib.source_remove(self._mode_desc_leave_timer)
+            self._mode_desc_leave_timer = GLib.timeout_add(200, _do_hide)
+
+        for btn, icon, text, impact, variant in [
+            (self._anim_mode_anim_btn, _ANIM_ICON, _ANIM_TEXT, _ANIM_IMPACT, "anim"),
+            (self._anim_mode_repl_btn, _REPL_ICON, _REPL_TEXT, _REPL_IMPACT, "repl"),
+        ]:
+            mc = Gtk.EventControllerMotion()
+            mc.connect("enter", lambda _c, _x, _y, i=icon, t=text, im=impact, v=variant:
+                       _show_mode_desc(i, t, im, v))
+            mc.connect("leave", lambda _c: _hide_mode_desc_delayed())
+            btn.add_controller(mc)
+
         # Animate inputs — visible only in animate mode, positioned below chips.
         # Appended here (after construction) so self._animate_box is ready.
         self.append(self._animate_box)

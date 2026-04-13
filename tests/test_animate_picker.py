@@ -155,3 +155,25 @@ def test_input_widget_always_has_base_css_class():
     from animate_picker import InputWidget
     w = InputWidget("motion", "MOTION VIDEO")
     assert w.has_css_class("input-widget")
+
+
+@gtk_required
+def test_mode_desc_bar_css_class_swap():
+    """Mode description bar correctly swaps CSS variant classes."""
+    import gi
+    gi.require_version("Gtk", "4.0")
+    from gi.repository import Gtk
+    bar = Gtk.Box()
+    bar.add_css_class("mode-desc-bar")
+    # Simulate switching to animation mode
+    bar.remove_css_class("mode-desc-bar-anim")
+    bar.remove_css_class("mode-desc-bar-repl")
+    bar.add_css_class("mode-desc-bar-anim")
+    assert bar.has_css_class("mode-desc-bar-anim")
+    assert not bar.has_css_class("mode-desc-bar-repl")
+    # Simulate switching to replacement mode
+    bar.remove_css_class("mode-desc-bar-anim")
+    bar.remove_css_class("mode-desc-bar-repl")
+    bar.add_css_class("mode-desc-bar-repl")
+    assert bar.has_css_class("mode-desc-bar-repl")
+    assert not bar.has_css_class("mode-desc-bar-anim")
