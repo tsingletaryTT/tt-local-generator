@@ -18,7 +18,7 @@ try:
     import gi
     gi.require_version("Gtk", "4.0")
     gi.require_version("Pango", "1.0")
-    from gi.repository import Gtk, Pango
+    from gi.repository import Gio, GLib, Gtk, Pango
     _GTK_AVAILABLE = True
     _GtkButtonBase = Gtk.Button
 except (ImportError, ValueError):
@@ -26,6 +26,8 @@ except (ImportError, ValueError):
     # Define a stub so the class body can be parsed without error;
     # instantiation will raise RuntimeError at runtime.
     _GTK_AVAILABLE = False
+    Gio = None  # type: ignore[assignment]
+    GLib = None  # type: ignore[assignment]
     Gtk = None  # type: ignore[assignment]
     Pango = None  # type: ignore[assignment]
 
@@ -274,3 +276,470 @@ class InputWidget(_GtkButtonBase):
             if not ok:
                 return None
         return str(thumb)
+
+
+# ── PickerPopover ─────────────────────────────────────────────────────────────
+
+
+class PickerPopover(Gtk.Popover if _GTK_AVAILABLE else object):
+    """
+    Three-tab popover picker anchored to an InputWidget.
+
+    Tabs:
+      📦 Bundled — clips from app/assets/motion_clips/ (motion picker only)
+      🎬 Gallery — records from HistoryStore
+      📁 Disk    — files from a user-chosen folder (saved in AppSettings)
+
+    Args:
+        widget_type:      "motion" or "char"
+        clips_dir:        path to app/assets/motion_clips/ (used for Bundled tab)
+        history_records:  list of GenerationRecord from HistoryStore.all_records()
+        settings:         AppSettings instance
+        on_select:        callable(path: str) — called when user confirms selection
+
+    Usage:
+        popover = PickerPopover("motion", clips_dir, records, settings, on_select)
+        popover.set_parent(input_widget)
+        popover.popup()
+    """
+
+    def __init__(
+        self,
+        widget_type: str,
+        clips_dir: str,
+        history_records: list,
+        settings,
+        on_select,
+    ) -> None:
+        if not _GTK_AVAILABLE:
+            raise RuntimeError(
+                "GTK4 is not available in this environment. "
+                "PickerPopover cannot be instantiated without a GTK4 display."
+            )
+        super().__init__()
+        self._widget_type = widget_type
+        self._clips_dir = clips_dir
+        self._history_records = history_records
+        self._settings = settings
+        self._on_select = on_select
+        self._selected_path: Optional[str] = None
+
+        self.add_css_class("picker-popover")
+        self.set_size_request(300, -1)
+
+        # Outer vertical box — all popover content lives here
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=0)
+        outer.set_margin_top(8)
+        outer.set_margin_bottom(0)
+        outer.set_margin_start(0)
+        outer.set_margin_end(0)
+        self.set_child(outer)
+
+        # ── Header: title + close button ──────────────────────────────────────
+        header = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        header.set_margin_start(10)
+        header.set_margin_end(6)
+        header.set_margin_bottom(4)
+        title_text = "Pick Motion Video" if widget_type == "motion" else "Pick Character Image"
+        title_lbl = Gtk.Label(label=title_text)
+        title_lbl.add_css_class("picker-title")
+        title_lbl.set_hexpand(True)
+        title_lbl.set_xalign(0)
+        close_btn = Gtk.Button(label="✕")
+        close_btn.add_css_class("trash-btn")  # reuse small transparent button style
+        close_btn.connect("clicked", lambda _: self.popdown())
+        header.append(title_lbl)
+        header.append(close_btn)
+        outer.append(header)
+
+        # ── Tab strip ─────────────────────────────────────────────────────────
+        tab_box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        tab_box.set_margin_start(4)
+        tab_box.set_margin_end(4)
+        sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        outer.append(tab_box)
+        outer.append(sep)
+
+        # ── Stack (one page per tab) ───────────────────────────────────────────
+        self._stack = Gtk.Stack()
+        self._stack.set_transition_type(Gtk.StackTransitionType.NONE)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_min_content_height(160)
+        scroll.set_max_content_height(260)
+        scroll.set_child(self._stack)
+        outer.append(scroll)
+
+        # ── Build tabs ────────────────────────────────────────────────────────
+        self._tab_btns: dict = {}
+
+        if widget_type == "motion":
+            self._add_tab(tab_box, "bundled", "📦 Bundled", self._build_bundled_page())
+        self._add_tab(tab_box, "gallery", "🎬 Gallery", self._build_gallery_page())
+        self._add_tab(tab_box, "disk", "📁 Disk", self._build_disk_page())
+
+        # Activate the first available tab
+        first_tab = "bundled" if widget_type == "motion" else "gallery"
+        self._activate_tab(first_tab)
+
+        # ── Footer: Cancel + Use this ─────────────────────────────────────────
+        footer_sep = Gtk.Separator(orientation=Gtk.Orientation.HORIZONTAL)
+        outer.append(footer_sep)
+
+        footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        footer.set_halign(Gtk.Align.END)
+        footer.set_margin_top(6)
+        footer.set_margin_bottom(6)
+        footer.set_margin_end(10)
+        cancel_btn = Gtk.Button(label="Cancel")
+        cancel_btn.add_css_class("picker-cancel-btn")
+        cancel_btn.connect("clicked", lambda _: self.popdown())
+        self._use_btn = Gtk.Button(label="Use this")
+        self._use_btn.add_css_class("picker-use-btn")
+        self._use_btn.set_sensitive(False)
+        self._use_btn.connect("clicked", self._on_use_clicked)
+        footer.append(cancel_btn)
+        footer.append(self._use_btn)
+        outer.append(footer)
+
+    # ── Tab management ─────────────────────────────────────────────────────────
+
+    def _add_tab(self, tab_box: "Gtk.Box", name: str, label: str, page: "Gtk.Widget") -> None:
+        btn = Gtk.ToggleButton(label=label)
+        btn.add_css_class("picker-tab-btn")
+        btn.connect("clicked", lambda b, n=name: self._activate_tab(n))
+        tab_box.append(btn)
+        self._tab_btns[name] = btn
+        self._stack.add_named(page, name)
+
+    def _activate_tab(self, name: str) -> None:
+        self._stack.set_visible_child_name(name)
+        for tab_name, btn in self._tab_btns.items():
+            if tab_name == name:
+                btn.add_css_class("picker-tab-btn-active")
+                btn.set_active(True)
+            else:
+                btn.remove_css_class("picker-tab-btn-active")
+                btn.set_active(False)
+        # Clear selection when switching tabs
+        self._set_selection(None)
+
+    # ── Tab page builders ─────────────────────────────────────────────────────
+
+    def _build_bundled_page(self) -> "Gtk.Widget":
+        """📦 Bundled tab — scans app/assets/motion_clips/ at open time."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.set_margin_top(8)
+        box.set_margin_start(8)
+        box.set_margin_end(8)
+        box.set_margin_bottom(4)
+
+        scanner = BundledClipScanner(self._clips_dir)
+        data = scanner.scan()
+
+        if not data:
+            lbl = Gtk.Label(label="No bundled clips found.")
+            lbl.add_css_class("picker-empty")
+            box.append(lbl)
+            return box
+
+        # Category filter chips
+        cat_flow = Gtk.FlowBox()
+        cat_flow.set_selection_mode(Gtk.SelectionMode.NONE)
+        cat_flow.set_row_spacing(4)
+        cat_flow.set_column_spacing(4)
+
+        # Thumbnail grid
+        grid = Gtk.FlowBox()
+        grid.set_selection_mode(Gtk.SelectionMode.NONE)
+        grid.set_row_spacing(5)
+        grid.set_column_spacing(5)
+        grid.set_min_children_per_line(3)
+        grid.set_max_children_per_line(6)
+
+        all_flat: list = [clip for clips in data.values() for clip in clips]
+
+        def _populate_grid(clips: list) -> None:
+            child = grid.get_first_child()
+            while child:
+                nxt = child.get_next_sibling()
+                grid.remove(child)
+                child = nxt
+            for clip in clips:
+                cell = self._make_thumb_cell(clip["name"], clip["thumb"], clip["mp4"])
+                grid.append(cell)
+
+        # Build category chip buttons
+        active_chip: dict = {"btn": None}
+
+        def _on_cat_clicked(btn, cat_name: str) -> None:
+            if active_chip["btn"]:
+                active_chip["btn"].remove_css_class("picker-cat-chip-active")
+            active_chip["btn"] = btn
+            btn.add_css_class("picker-cat-chip-active")
+            _populate_grid(data[cat_name])
+            self._set_selection(None)
+
+        for cat_name in sorted(data.keys()):
+            chip_btn = Gtk.Button(label=cat_name.capitalize())
+            chip_btn.add_css_class("picker-cat-chip")
+            chip_btn.connect("clicked", _on_cat_clicked, cat_name)
+            cat_flow.append(chip_btn)
+
+        box.append(cat_flow)
+        _populate_grid(all_flat)
+        box.append(grid)
+        return box
+
+    def _build_gallery_page(self) -> "Gtk.Widget":
+        """🎬 Gallery tab — reads HistoryStore records."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.set_margin_top(8)
+        box.set_margin_start(8)
+        box.set_margin_end(8)
+        box.set_margin_bottom(4)
+
+        if self._widget_type == "motion":
+            records = [r for r in self._history_records
+                       if r.media_type == "video" and r.video_exists]
+            hint = "Your generated videos — newest first"
+        else:
+            # Character: show all records with a thumbnail (first-frame stills work)
+            records = [r for r in self._history_records if r.thumbnail_exists]
+            hint = "Your generated outputs — newest first"
+
+        if not records:
+            lbl = Gtk.Label(label="No generated outputs yet.")
+            lbl.add_css_class("picker-empty")
+            box.append(lbl)
+            return box
+
+        hint_lbl = Gtk.Label(label=hint)
+        hint_lbl.add_css_class("picker-empty")
+        hint_lbl.set_xalign(0)
+        box.append(hint_lbl)
+
+        grid = Gtk.FlowBox()
+        grid.set_selection_mode(Gtk.SelectionMode.NONE)
+        grid.set_row_spacing(5)
+        grid.set_column_spacing(5)
+        grid.set_min_children_per_line(3)
+        grid.set_max_children_per_line(6)
+
+        for rec in records:
+            # Motion picker: path is the video. Character picker: path is the thumbnail.
+            media_path = rec.video_path if self._widget_type == "motion" else rec.thumbnail_path
+            label = rec.id[:8]
+            cell = self._make_thumb_cell(label, rec.thumbnail_path, media_path)
+            grid.append(cell)
+
+        box.append(grid)
+        return box
+
+    def _build_disk_page(self) -> "Gtk.Widget":
+        """📁 Disk tab — user-chosen folder scanned on open."""
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
+        box.set_margin_top(8)
+        box.set_margin_start(8)
+        box.set_margin_end(8)
+        box.set_margin_bottom(4)
+
+        folder = self._settings.get("motion_clips_dir") or ""
+
+        # Folder path row
+        folder_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        folder_row.add_css_class("picker-folder-row")
+        folder_icon = Gtk.Label(label="📁")
+        folder_path_lbl = Gtk.Label(label=folder if folder else "No folder selected")
+        folder_path_lbl.add_css_class("picker-empty")
+        folder_path_lbl.set_hexpand(True)
+        folder_path_lbl.set_ellipsize(Pango.EllipsizeMode.MIDDLE)
+        folder_path_lbl.set_xalign(0)
+        change_btn = Gtk.Button(label="Change…")
+        change_btn.add_css_class("picker-cancel-btn")
+
+        def _change_folder(_btn):
+            dlg = Gtk.FileDialog()
+            dlg.set_title("Select Motion Clips Folder")
+            dlg.select_folder(None, None, self._on_folder_chosen)
+
+        change_btn.connect("clicked", _change_folder)
+        folder_row.append(folder_icon)
+        folder_row.append(folder_path_lbl)
+        folder_row.append(change_btn)
+        box.append(folder_row)
+
+        # Grid of video/image files in the folder
+        grid = Gtk.FlowBox()
+        grid.set_selection_mode(Gtk.SelectionMode.NONE)
+        grid.set_row_spacing(5)
+        grid.set_column_spacing(5)
+        grid.set_min_children_per_line(3)
+        grid.set_max_children_per_line(6)
+
+        if folder and Path(folder).is_dir():
+            self._populate_disk_grid(grid, folder)
+        else:
+            empty_lbl = Gtk.Label(label="No folder — drag clips here or click Change…")
+            empty_lbl.add_css_class("picker-empty")
+            empty_lbl.set_wrap(True)
+            grid.append(empty_lbl)
+
+        # Dashed "Browse…" tile for one-off file picks
+        browse_tile = Gtk.Button(label="＋\nBrowse…")
+        browse_tile.add_css_class("picker-browse-tile")
+        browse_tile.connect("clicked", self._on_browse_file)
+        grid.append(browse_tile)
+        box.append(grid)
+        return box
+
+    def _populate_disk_grid(self, grid: "Gtk.FlowBox", folder: str) -> None:
+        """Add thumbnail cells for all video/image files in *folder*.
+
+        Thumbnails for video files are cached in ~/.cache/tt-video-gen/disk_thumbs/
+        rather than written next to the source file (which may be on a read-only
+        or user-owned filesystem).
+        """
+        folder_path = Path(folder)
+        cache_dir = Path.home() / ".cache" / "tt-video-gen" / "disk_thumbs"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+
+        extensions = set(_VIDEO_EXTENSIONS) | set(_IMAGE_EXTENSIONS)
+        try:
+            files = sorted(
+                f for f in folder_path.iterdir()
+                if f.is_file() and f.suffix.lower() in extensions
+            )
+        except PermissionError:
+            err_lbl = Gtk.Label(label="Cannot read folder — check permissions.")
+            err_lbl.add_css_class("picker-empty")
+            err_lbl.set_wrap(True)
+            grid.append(err_lbl)
+            return
+
+        if not files:
+            lbl = Gtk.Label(label="No files in folder — drag some in or click Browse.")
+            lbl.add_css_class("picker-empty")
+            lbl.set_wrap(True)
+            grid.append(lbl)
+            return
+
+        for file_path in files:
+            if file_path.suffix.lower() in _IMAGE_EXTENSIONS:
+                thumb_path = str(file_path)
+            else:
+                # Cache video thumbnails using a hash-based name to avoid collisions
+                thumb_name = file_path.stem + "_" + str(abs(hash(str(file_path))))[:8] + ".jpg"
+                thumb_path_obj = cache_dir / thumb_name
+                if not thumb_path_obj.exists():
+                    extract_thumbnail(str(file_path), str(thumb_path_obj))
+                thumb_path = str(thumb_path_obj) if thumb_path_obj.exists() else ""
+
+            cell = self._make_thumb_cell(file_path.name[:12], thumb_path, str(file_path))
+            grid.append(cell)
+
+    # ── Selection helpers ─────────────────────────────────────────────────────
+
+    def _make_thumb_cell(self, label: str, thumb_path: str, media_path: str) -> "Gtk.Widget":
+        """Return a 60×44 thumbnail cell widget for the picker grid."""
+        overlay = Gtk.Overlay()
+        frame = Gtk.Frame()
+        frame.add_css_class("picker-thumb-cell")
+        frame.set_size_request(60, 44)
+        overlay.set_child(frame)
+
+        if thumb_path and Path(thumb_path).exists():
+            pic = Gtk.Picture.new_for_filename(thumb_path)
+            pic.set_can_shrink(True)
+            pic.set_hexpand(True)
+            pic.set_vexpand(True)
+            frame.set_child(pic)
+        else:
+            icon = Gtk.Label(label="🎬")
+            icon.set_valign(Gtk.Align.CENTER)
+            icon.set_halign(Gtk.Align.CENTER)
+            frame.set_child(icon)
+
+        # Filename label overlaid at bottom
+        name_lbl = Gtk.Label(label=label)
+        name_lbl.add_css_class("picker-empty")
+        name_lbl.set_valign(Gtk.Align.END)
+        name_lbl.set_halign(Gtk.Align.FILL)
+        name_lbl.set_ellipsize(Pango.EllipsizeMode.END)
+        overlay.add_overlay(name_lbl)
+
+        # Click gesture
+        gesture = Gtk.GestureClick()
+        gesture.connect("pressed", lambda *_: self._on_cell_clicked(frame, media_path))
+        overlay.add_controller(gesture)
+
+        return overlay
+
+    def _on_cell_clicked(self, frame: "Gtk.Frame", path: str) -> None:
+        """Handle a click on a thumbnail cell."""
+        page = self._stack.get_visible_child()
+        if page:
+            self._deselect_all_in_widget(page)
+        frame.add_css_class("picker-thumb-cell-selected")
+        self._set_selection(path)
+
+    def _deselect_all_in_widget(self, widget: "Gtk.Widget") -> None:
+        """Recursively remove picker-thumb-cell-selected from all descendants."""
+        if widget.has_css_class("picker-thumb-cell"):
+            widget.remove_css_class("picker-thumb-cell-selected")
+        child = widget.get_first_child()
+        while child:
+            self._deselect_all_in_widget(child)
+            child = child.get_next_sibling()
+
+    def _set_selection(self, path: Optional[str]) -> None:
+        self._selected_path = path
+        self._use_btn.set_sensitive(path is not None)
+
+    # ── Action handlers ───────────────────────────────────────────────────────
+
+    def _on_use_clicked(self, _btn) -> None:
+        if self._selected_path:
+            self._on_select(self._selected_path)
+        self.popdown()
+
+    def _on_folder_chosen(self, dlg, result) -> None:
+        try:
+            gfile = dlg.select_folder_finish(result)
+        except Exception:
+            return
+        path = gfile.get_path()
+        if path:
+            self._settings.set("motion_clips_dir", path)
+            # Rebuild the disk page with the new folder
+            disk_page = self._build_disk_page()
+            old = self._stack.get_child_by_name("disk")
+            if old:
+                self._stack.remove(old)
+            self._stack.add_named(disk_page, "disk")
+            self._activate_tab("disk")
+
+    def _on_browse_file(self, _btn) -> None:
+        """Open a single-file FileDialog for a one-off pick."""
+        dlg = Gtk.FileDialog()
+        dlg.set_title("Select File")
+        f = Gtk.FileFilter()
+        f.set_name("Videos and Images")
+        for pat in ("*.mp4", "*.mov", "*.avi", "*.webm", "*.mkv",
+                    "*.png", "*.jpg", "*.jpeg", "*.webp"):
+            f.add_pattern(pat)
+        store = Gio.ListStore.new(Gtk.FileFilter)
+        store.append(f)
+        dlg.set_filters(store)
+        dlg.open(None, None, self._on_browse_file_chosen)
+
+    def _on_browse_file_chosen(self, dlg, result) -> None:
+        try:
+            gfile = dlg.open_finish(result)
+        except Exception:
+            return
+        path = gfile.get_path()
+        if path:
+            self._on_select(path)
+            self.popdown()
