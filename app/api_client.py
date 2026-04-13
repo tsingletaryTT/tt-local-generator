@@ -194,6 +194,7 @@ class APIClient:
         num_inference_steps: int = 20,
         seed: Optional[int] = None,
         num_frames: Optional[int] = None,
+        image: Optional[str] = None,
     ) -> str:
         """
         Submit a video generation job.
@@ -206,6 +207,10 @@ class APIClient:
             num_frames: Number of output frames. None means the runner uses its
                         default.  Valid SkyReels counts: (N-1) % 4 == 0
                         (9, 13, 17, 21, 25, 29, 33, 65, 97, …).
+            image: Base64-encoded conditioning image (data-URI format,
+                   e.g. "data:image/jpeg;base64,...") or a URL.
+                   Used by SkyReels I2V and similar image-to-video runners.
+                   None means the runner uses its default (black frame for warmup).
 
         Returns:
             The job ID string (UUID).
@@ -224,6 +229,8 @@ class APIClient:
             payload["seed"] = seed
         if num_frames is not None and num_frames > 0:
             payload["num_frames"] = num_frames
+        if image:
+            payload["image"] = image
 
         resp = requests.post(
             f"{self.base_url}/v1/videos/generations",

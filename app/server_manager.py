@@ -95,10 +95,10 @@ SERVERS: dict[str, ServerDef] = {
         ),
         ServerDef(
             key="skyreels",
-            label="SkyReels-V2-DF-1.3B-540P  (Blackhole)",
-            script="start_skyreels.sh",
+            label="SkyReels-V2-I2V-14B-540P  (Blackhole)",
+            script="start_skyreels_i2v.sh",
             health_url="http://localhost:8000/tt-liveness",
-            runner_key="tt-skyreels-v2",
+            runner_key="tt-skyreels-v2-i2v",
         ),
         ServerDef(
             key="prompt-server",

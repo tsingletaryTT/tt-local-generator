@@ -27,11 +27,13 @@ For **animate** prompts (Wan2.2 Animate — character animation):
 > (Keep animate prompts character-focused and action-specific — the model animates a still image,
 >  so motion direction matters more than scene detail.)
 
-For **SkyReels** prompts (SkyReels-V2-DF-1.3B-540P — cinematic short clips):
-> FPS-24, [subject] [action], [setting], [time/weather], [camera move], [style/mood]
-> SkyReels is WAN-derived and optimized for flowing, physically plausible motion. It handles
-> nature, animals, urban scenes, and wide establishing shots better than tight character close-ups.
-> Start with subject and action. Keep it simple — one motion beats five.
+For **SkyReels** prompts (SkyReels-V2-I2V-14B-540P — image-to-video, 960×544, 97 frames):
+> FPS-24, [motion description], [camera move], [atmosphere/mood]
+> SkyReels I2V animates from a provided conditioning image. The prompt describes how the scene
+> evolves — focus on motion and change rather than re-describing the image contents.
+> Start with the key action. Keep it simple — one motion beats five.
+> Good: "FPS-24, leaves rustling in wind, soft golden light, static shot"
+> Good: "FPS-24, slow zoom out, fog drifting across the scene, cinematic"
 > Negative prompt (always include, hidden from user): chaotic, distortion, morphing, shaky camera,
 > panning, zoom, glare, lens flare, blur, low quality, bad hands, bad teeth, bad eyes, bad limbs
 

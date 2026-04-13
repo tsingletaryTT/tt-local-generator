@@ -18,6 +18,7 @@ Classes:
     RecoveryDialog   — modal listing unknown server jobs to re-attach
     MainWindow       — top-level Gtk.ApplicationWindow
 """
+import base64
 import json
 import os
 import shutil
@@ -948,7 +949,7 @@ _MODEL_DISPLAY: dict = {
     "mochi-1-preview":       "Mochi-1",
     "flux.1-dev":            "FLUX",
     "wan2.2-animate-14b":    "Animate-14B",
-    "skyreels-v2-1.3b-540p": "SkyReels",
+    "skyreels-v2-i2v-14b-540p": "SkyReels I2V",
 }
 
 # Short director names shown in the menu + Preferences dialog, mapped to the
@@ -988,7 +989,7 @@ _SKIP_META_KEYS: frozenset = frozenset({
 _SERVER_SCRIPTS: dict = {
     ("video",   "wan2"):      ("start_wan_qb2.sh",  "Wan2.2 video (P300X2)"),
     ("video",   "mochi"):     ("start_mochi.sh",    "Mochi-1 video"),
-    ("video",   "skyreels"):  ("start_skyreels.sh", "SkyReels-V2 video (Blackhole)"),
+    ("video",   "skyreels"):  ("start_skyreels_i2v.sh", "SkyReels-V2-I2V video (Blackhole)"),
     ("image",   "flux"):      ("start_flux.sh",     "FLUX image"),
     ("animate", ""):          ("start_animate.sh",  "Wan2.2-Animate"),
 }
@@ -997,7 +998,7 @@ _SERVER_SCRIPTS: dict = {
 _VIDEO_MODEL_IDS: dict = {
     "wan2":      "wan2.2-t2v",
     "mochi":     "mochi-1-preview",
-    "skyreels":  "skyreels-v2-1.3b-540p",
+    "skyreels":  "skyreels-v2-i2v-14b-540p",
 }
 _IMAGE_MODEL_IDS: dict = {
     "flux": "flux.1-dev",
@@ -2209,9 +2210,10 @@ class GalleryWidget(Gtk.Box):
 _MODEL_TO_SOURCE: dict = {
     "wan2.2-t2v":            "video",
     "mochi-1-preview":       "video",
-    "skyreels-v2-1.3b-540p": "video",
-    # Full HuggingFace model ID as reported by the inference server's /v1/models endpoint
-    "Skywork/SkyReels-V2-DF-1.3B-540P-Diffusers": "video",
+    "skyreels-v2-i2v-14b-540p": "video",
+    # Full model names as reported by the inference server's /v1/models endpoint
+    "SkyReels-V2-I2V-14B-540P": "video",
+    "Skywork/SkyReels-V2-I2V-14B-540P": "video",
     "wan2.2-animate-14b":    "animate",
     "flux.1-dev":            "image",
 }
@@ -2219,16 +2221,18 @@ _MODEL_TO_SOURCE: dict = {
 _MODEL_TO_VIDEO_KEY: dict = {
     "wan2.2-t2v":            "wan2",
     "mochi-1-preview":       "mochi",
-    "skyreels-v2-1.3b-540p": "skyreels",
-    # Full HuggingFace model ID as reported by the inference server's /v1/models endpoint
-    "Skywork/SkyReels-V2-DF-1.3B-540P-Diffusers": "skyreels",
+    "skyreels-v2-i2v-14b-540p": "skyreels",
+    # Full model names as reported by the inference server's /v1/models endpoint
+    "SkyReels-V2-I2V-14B-540P": "skyreels",
+    "Skywork/SkyReels-V2-I2V-14B-540P": "skyreels",
 }
 _MODEL_DISPLAY_SERVER: dict = {
     "wan2.2-t2v":            "Wan2.2 online",
     "mochi-1-preview":       "Mochi-1 online",
-    "skyreels-v2-1.3b-540p": "SkyReels online",
-    # Full HuggingFace model ID as reported by the inference server's /v1/models endpoint
-    "Skywork/SkyReels-V2-DF-1.3B-540P-Diffusers": "SkyReels online",
+    "skyreels-v2-i2v-14b-540p": "SkyReels I2V online",
+    # Full model names as reported by the inference server's /v1/models endpoint
+    "SkyReels-V2-I2V-14B-540P": "SkyReels I2V online",
+    "Skywork/SkyReels-V2-I2V-14B-540P": "SkyReels I2V online",
     "wan2.2-animate-14b":    "Animate-14B online",
     "flux.1-dev":            "FLUX online",
 }
@@ -3212,7 +3216,7 @@ class ControlPanel(Gtk.Box):
         _DISPLAY = {
             "wan2":     ("\u25cf Wan2.2",   "720p"),
             "mochi":    ("\u25cf Mochi-1",  "480\u00d7848"),
-            "skyreels": ("\u25cf SkyReels", "480\u00d7272"),
+            "skyreels": ("\u25cf SkyReels I2V", "960\u00d7544"),
         }
         _OFFLINE = "\u25cb No server \u00b7 Start one \u203a"
 
@@ -3804,11 +3808,11 @@ class ControlPanel(Gtk.Box):
                 )
             elif model == "skyreels":
                 self._source_desc_lbl.set_label(
-                    "async job  ·  SkyReels-V2-DF-1.3B  ·  ~2–5 min  ·  480×272 9-frame  ·  Blackhole"
+                    "async job  ·  SkyReels-V2-I2V-14B  ·  ~10–30 min  ·  960×544 97-frame  ·  Blackhole  ·  image-to-video"
                 )
                 self._server_start_btn.set_tooltip_text(
-                    "Start the SkyReels-V2 inference server.\n"
-                    "Video (SkyReels) → start_skyreels.sh  (P150X4 Blackhole)"
+                    "Start the SkyReels-V2-I2V-14B inference server.\n"
+                    "Video (SkyReels I2V) → start_skyreels_i2v.sh  (P300X2 Blackhole)"
                 )
             else:
                 self._source_desc_lbl.set_label(
@@ -3830,7 +3834,8 @@ class ControlPanel(Gtk.Box):
         return self._model_source
 
     def get_video_model(self) -> str:
-        """Return the currently selected video model key ('wan2', 'mochi', or 'skyreels')."""
+        """Return the currently selected video model key ('wan2', 'mochi', or 'skyreels').
+        'skyreels' maps to SkyReels-V2-I2V-14B-540P (image-to-video)."""
         return self._video_model
 
     def get_image_model(self) -> str:
@@ -6700,6 +6705,17 @@ class MainWindow(Gtk.ApplicationWindow):
             slot = str(_settings.get("clip_length_slot") or "standard")
             if video_model_key not in MODELS_WITH_FIXED_FRAMES:
                 num_frames_arg = clip_frames(video_model_key, slot)
+
+            # For I2V models (skyreels), base64-encode the seed image and send
+            # it to the server as the conditioning frame.
+            image_b64: "str | None" = None
+            if video_model_key == "skyreels" and seed_image_path and Path(seed_image_path).is_file():
+                with open(seed_image_path, "rb") as _f:
+                    _raw = _f.read()
+                _ext = Path(seed_image_path).suffix.lower().lstrip(".")
+                _mime = "image/jpeg" if _ext in ("jpg", "jpeg") else f"image/{_ext}"
+                image_b64 = f"data:{_mime};base64," + base64.b64encode(_raw).decode()
+
             gen = GenerationWorker(
                 client=self._client,
                 store=self._store,
@@ -6710,6 +6726,7 @@ class MainWindow(Gtk.ApplicationWindow):
                 seed_image_path=seed_image_path,
                 model=model_name,
                 num_frames=num_frames_arg,
+                image=image_b64,
             )
         self._worker_gen = gen
 

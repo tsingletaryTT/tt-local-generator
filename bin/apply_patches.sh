@@ -325,6 +325,103 @@ p.write_text(new_text)
 print(f"   inserted SkyReels ModelSpecTemplate ✓  (backup: {backup.name})")
 PYEOF
 
+# ── Step 7: Inject SkyReels I2V into model_spec.py ───────────────────────────
+
+echo "7. Patching $MODEL_SPEC (SkyReels I2V ModelSpecTemplate)"
+
+python3 - "$MODEL_SPEC" <<'PYEOF'
+import sys, shutil, pathlib
+
+p = pathlib.Path(sys.argv[1])
+text = p.read_text()
+
+MARKER = "Skywork/SkyReels-V2-I2V-14B-540P"
+if MARKER in text:
+    print("   already patched — nothing to do")
+    sys.exit(0)
+
+# Find the SkyReels T2V template by its weights string, then walk forward
+# counting parenthesis depth to locate the TRUE closing paren of that template.
+# (A naive text.find("),\n") would match a DeviceModelSpec close inside the
+# template, inserting the I2V entry in the middle of device_model_specs.)
+ANCHOR_SR = "Skywork/SkyReels-V2-DF-1.3B-540P-Diffusers"
+ANCHOR_FALLBACK = "]\n\n# =============================================================================\n# image_templates"
+
+if ANCHOR_SR in text:
+    idx = text.find(ANCHOR_SR)
+    # Walk back to find the "ModelSpecTemplate(" that contains ANCHOR_SR
+    block_start = text.rfind("ModelSpecTemplate(", 0, idx)
+    if block_start == -1:
+        print("ERROR: could not locate start of SkyReels T2V block")
+        sys.exit(1)
+    # Walk forward counting paren depth to find the matching close paren
+    depth = 0
+    pos = block_start
+    insert_pos = -1
+    while pos < len(text):
+        ch = text[pos]
+        if ch == '(':
+            depth += 1
+        elif ch == ')':
+            depth -= 1
+            if depth == 0:
+                # pos points at the closing ) of ModelSpecTemplate(...)
+                # Insert after the following ",\n"
+                insert_pos = pos + 1
+                while insert_pos < len(text) and text[insert_pos] in ',\n':
+                    insert_pos += 1
+                break
+        pos += 1
+    if insert_pos == -1:
+        print("ERROR: could not locate closing paren of SkyReels T2V block")
+        sys.exit(1)
+    anchor_used = "after SkyReels T2V block"
+elif ANCHOR_FALLBACK in text:
+    insert_pos = text.find(ANCHOR_FALLBACK)
+    anchor_used = "before image_templates"
+else:
+    print(f"ERROR: could not find insertion anchor in {p}")
+    print("  Apply the I2V ModelSpecTemplate block manually.")
+    sys.exit(1)
+
+I2V_ENTRY = """\
+    # SkyReels-V2-I2V-14B-540P — Blackhole (P150X4 / P300X2) only.
+    # Weights: ~58 GB (14 sharded safetensors, raw WAN 2.1 format).
+    # Also requires WAN 2.2 A14B diffusers checkpoint for VAE/T5 architecture.
+    # Input: text prompt + conditioning image.  Output: 960x544 by default.
+    ModelSpecTemplate(
+        weights=["Skywork/SkyReels-V2-I2V-14B-540P"],
+        tt_metal_commit="555f240",
+        impl=tt_transformers_impl,
+        min_disk_gb=75,
+        min_ram_gb=32,
+        model_type=ModelType.VIDEO,
+        inference_engine=InferenceEngine.MEDIA.value,
+        device_model_specs=[
+            DeviceModelSpec(
+                device=DeviceTypes.P150X4,
+                max_concurrency=1,
+                max_context=64 * 1024,
+                default_impl=True,
+            ),
+            DeviceModelSpec(
+                device=DeviceTypes.P300X2,
+                max_concurrency=1,
+                max_context=64 * 1024,
+                default_impl=True,
+            ),
+        ],
+        status=ModelStatusTypes.COMPLETE,
+    ),
+"""
+
+backup = p.with_suffix(".py.bak")
+shutil.copy2(p, backup)
+new_text = text[:insert_pos] + I2V_ENTRY + text[insert_pos:]
+p.write_text(new_text)
+print(f"   inserted SkyReels I2V ModelSpecTemplate ✓  ({anchor_used}, backup: {backup.name})")
+PYEOF
+
 echo ""
 echo "Done. You can now run start_mochi.sh (or any media-server model with --dev-mode)"
 echo "and the patches/tt_dit/ files will be bind-mounted automatically."
