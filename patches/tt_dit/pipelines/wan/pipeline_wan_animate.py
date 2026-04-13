@@ -45,6 +45,16 @@ _ANIMATE_ONLY_KEY_PREFIXES = (
     "pose_patch_embedding.",
 )
 
+# Keys dropped via substring match (not just prefix) — Animate has added_kv_proj
+# inside each transformer block's cross-attention (attn2.add_k_proj, attn2.add_v_proj,
+# attn2.norm_added_k, attn2.norm_added_v): 200 keys across 40 blocks × 5 per block.
+_ANIMATE_ONLY_KEY_SUBSTRINGS = (
+    ".attn2.add_k_proj.",
+    ".attn2.add_v_proj.",
+    ".attn2.norm_added_k.",
+    ".attn2.norm_added_v.",
+)
+
 
 class WanPipelineAnimate(WanPipelineI2V):
     """
@@ -109,7 +119,8 @@ class WanPipelineAnimate(WanPipelineI2V):
 
         animate_unexpected = [
             k for k in result.unexpected_keys
-            if any(k.startswith(p) for p in _ANIMATE_ONLY_KEY_PREFIXES)
+            if (any(k.startswith(p) for p in _ANIMATE_ONLY_KEY_PREFIXES)
+                or any(s in k for s in _ANIMATE_ONLY_KEY_SUBSTRINGS))
         ]
         other_unexpected = [
             k for k in result.unexpected_keys
@@ -138,6 +149,13 @@ class WanPipelineAnimate(WanPipelineI2V):
             reference_video_frames: list[PIL.Image] | None — motion source frames.
                 Not used in v1.
             **kwargs: forwarded to WanPipelineI2V.__call__.
+
+        Notes:
+            guidance_scale_2 defaults to None here (not the parent's default of 3.0)
+            because Animate runs single-transformer (boundary_ratio=None), and the
+            parent check_inputs raises ValueError if guidance_scale_2 is set without
+            a boundary_ratio.
         """
+        kwargs.setdefault("guidance_scale_2", None)
         image_prompt = ImagePrompt(image=character_image, frame_pos=0)
         return super().__call__(image_prompt=image_prompt, **kwargs)
