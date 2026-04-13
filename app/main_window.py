@@ -41,6 +41,7 @@ from gi.repository import GdkPixbuf, GLib, Gio, Gtk, Pango
 from api_client import APIClient
 from app_settings import settings as _settings
 from chip_config import load_chips as _load_chips
+from animate_picker import InputWidget, PickerPopover
 from history_store import GenerationRecord, HistoryStore
 from worker import AnimateGenerationWorker, GenerationWorker, ImageGenerationWorker
 import attractor
@@ -2814,35 +2815,44 @@ class ControlPanel(Gtk.Box):
         _anim_title.add_css_class("animate-inputs-title")
         self._animate_box.append(_anim_title)
 
-        self._animate_box.append(self._section("Motion Video"))
-        mv_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        self._anim_video_lbl = Gtk.Label(label="none")
-        self._anim_video_lbl.add_css_class("muted")
-        self._anim_video_lbl.set_ellipsize(Pango.EllipsizeMode.START)
-        self._anim_video_lbl.set_hexpand(True)
-        self._anim_video_lbl.set_xalign(1)
-        self._anim_video_lbl.set_tooltip_text("Reference video supplying the motion pattern")
-        mv_row.append(self._anim_video_lbl)
-        anim_video_btn = Gtk.Button(label="Browse…")
-        anim_video_btn.set_tooltip_text("Pick an MP4 motion source video")
-        anim_video_btn.connect("clicked", self._pick_ref_video)
-        mv_row.append(anim_video_btn)
-        self._animate_box.append(mv_row)
+        # ── Motion Video + Character inputs (side-by-side InputWidgets) ─────────
+        # These replace the old Browse-button rows; PickerPopover is created fresh
+        # on each click so HistoryStore records are always up-to-date.
+        inputs_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
 
-        self._animate_box.append(self._section("Character Image"))
-        ci_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        self._anim_char_lbl = Gtk.Label(label="none")
-        self._anim_char_lbl.add_css_class("muted")
-        self._anim_char_lbl.set_ellipsize(Pango.EllipsizeMode.START)
-        self._anim_char_lbl.set_hexpand(True)
-        self._anim_char_lbl.set_xalign(1)
-        self._anim_char_lbl.set_tooltip_text("Character image to animate")
-        ci_row.append(self._anim_char_lbl)
-        anim_char_btn = Gtk.Button(label="Browse…")
-        anim_char_btn.set_tooltip_text("Pick a character image (PNG/JPG)")
-        anim_char_btn.connect("clicked", self._pick_ref_image)
-        ci_row.append(anim_char_btn)
-        self._animate_box.append(ci_row)
+        self._motion_input = InputWidget("motion", "MOTION VIDEO")
+        self._char_input   = InputWidget("char",   "CHARACTER")
+
+        inputs_row.append(self._motion_input)
+        inputs_row.append(self._char_input)
+        self._animate_box.append(inputs_row)
+
+        def _open_motion_picker(_btn):
+            clips_dir = str(Path(__file__).parent / "assets" / "motion_clips")
+            picker = PickerPopover(
+                widget_type="motion",
+                clips_dir=clips_dir,
+                history_records=self._store.all_records() if hasattr(self, "_store") else [],
+                settings=_settings,
+                on_select=self.set_motion_input,
+            )
+            picker.set_parent(self._motion_input)
+            picker.popup()
+
+        def _open_char_picker(_btn):
+            clips_dir = str(Path(__file__).parent / "assets" / "motion_clips")
+            picker = PickerPopover(
+                widget_type="char",
+                clips_dir=clips_dir,
+                history_records=self._store.all_records() if hasattr(self, "_store") else [],
+                settings=_settings,
+                on_select=self.set_char_input,
+            )
+            picker.set_parent(self._char_input)
+            picker.popup()
+
+        self._motion_input.connect("clicked", _open_motion_picker)
+        self._char_input.connect("clicked", _open_char_picker)
 
         self._animate_box.append(self._section("Animation Mode"))
         mode_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
@@ -4322,7 +4332,19 @@ class ControlPanel(Gtk.Box):
         """
         self._set_seed_image("")
 
-    # ── Animate file pickers ───────────────────────────────────────────────────
+    # ── Animate input setters (public API used by PickerPopover callbacks) ────
+
+    def set_motion_input(self, path: str) -> None:
+        """Set the Motion Video InputWidget and internal ref_video_path."""
+        self._ref_video_path = path
+        self._motion_input.set_value(path)
+
+    def set_char_input(self, path: str) -> None:
+        """Set the Character InputWidget and internal ref_char_path."""
+        self._ref_char_path = path
+        self._char_input.set_value(path)
+
+    # ── Animate file pickers (fallback Browse dialogs) ────────────────────────
 
     def _pick_ref_video(self, _btn) -> None:
         dlg = Gtk.FileDialog()
@@ -4342,10 +4364,7 @@ class ControlPanel(Gtk.Box):
             return
         path = gfile.get_path()
         if path:
-            self._ref_video_path = path
-            self._anim_video_lbl.set_label(Path(path).name)
-            self._anim_video_lbl.remove_css_class("muted")
-            self._anim_video_lbl.set_tooltip_text(path)
+            self.set_motion_input(path)
 
     def _pick_ref_image(self, _btn) -> None:
         dlg = Gtk.FileDialog()
@@ -4365,10 +4384,7 @@ class ControlPanel(Gtk.Box):
             return
         path = gfile.get_path()
         if path:
-            self._ref_char_path = path
-            self._anim_char_lbl.set_label(Path(path).name)
-            self._anim_char_lbl.remove_css_class("muted")
-            self._anim_char_lbl.set_tooltip_text(path)
+            self.set_char_input(path)
 
     def _set_animate_mode(self, mode: str) -> None:
         # Active state handled by ToggleButton group (:checked CSS); no manual CSS needed.
