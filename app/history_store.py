@@ -118,6 +118,36 @@ class GenerationRecord:
             model=model,
         )
 
+    @classmethod
+    def new_animate(
+        cls,
+        job_id: str,
+        prompt: str,
+        negative_prompt: str,
+        num_inference_steps: int,
+        seed: int,
+        duration_s: float = 0.0,
+        seed_image_path: str = "",
+        model: str = "",
+    ) -> "GenerationRecord":
+        """Create a new animation record with media_type='animate'."""
+        ts = datetime.now()
+        ts_str = ts.strftime("%Y%m%d_%H%M%S")
+        return cls(
+            id=job_id,
+            prompt=prompt,
+            negative_prompt=negative_prompt,
+            num_inference_steps=num_inference_steps,
+            seed=seed,
+            video_path=str(VIDEOS_DIR / f"{ts_str}_{job_id[:8]}.mp4"),
+            thumbnail_path=str(THUMBNAILS_DIR / f"{ts_str}_{job_id[:8]}.jpg"),
+            created_at=ts.isoformat(),
+            duration_s=duration_s,
+            seed_image_path=seed_image_path,
+            media_type="animate",
+            model=model,
+        )
+
     @property
     def display_time(self) -> str:
         """Human-readable creation time, e.g. '14:32'."""

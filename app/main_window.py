@@ -1031,6 +1031,12 @@ menubar > item:selected {
     color: @tt_pink;
 }
 
+.mode-desc-static {
+    font-size: 10px;
+    color: alpha(@tt_text, 0.5);
+    padding: 2px 0 4px 0;
+}
+
 /* -- Picker popover --------------------------------------------------------- */
 popover.picker-popover > contents {
     background-color: @tt_bg_darkest;
@@ -2519,7 +2525,8 @@ class ControlPanel(Gtk.Box):
         on_start_prompt_gen = None,  # () -> None — launch start_prompt_gen.sh --gui
         on_inspire = None,           # (source: str, seed_text: str) -> None — start generation thread
         on_theme_queue = None,       # (source: str) -> None — generate & popover a 5-shot theme set
-        on_open_playlist = None,     # (playlist_id: str | None) -> None — open TT-TV for a playlist
+        on_open_playlist = None,       # (playlist_id: str | None) -> None — open TT-TV for a playlist
+        on_open_model_playlist = None, # (model_id: str) -> None — open TT-TV filtered by model
         on_enter_selection_mode = None,  # (playlist_id: str) -> None — enter grid selection mode
     ):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8)
@@ -2533,6 +2540,7 @@ class ControlPanel(Gtk.Box):
         self._on_inspire = on_inspire or (lambda s, t: None)
         self._on_theme_queue = on_theme_queue or (lambda s: None)
         self._on_open_playlist = on_open_playlist or (lambda pid: None)
+        self._on_open_model_playlist = on_open_model_playlist or (lambda mid: None)
         self._on_enter_selection_mode = on_enter_selection_mode or (lambda pid: None)
         self._theme_generating: bool = False  # True while theme generation is in progress
         # ── Prompt gen server state ───────────────────────────────────────────
@@ -2594,7 +2602,7 @@ class ControlPanel(Gtk.Box):
         _logo_img = Gtk.Image.new_from_file(_logo_path)
         _logo_img.set_pixel_size(22)
         self._toolbar_box.append(_logo_img)
-        self._title_lbl = Gtk.Label(label="TT VIDEO GENERATOR")
+        self._title_lbl = Gtk.Label(label="TT Local Generator")
         self._title_lbl.add_css_class("tt-toolbar-title")
         attrs = Pango.AttrList()
         attrs.insert(Pango.AttrFontDesc.new(
@@ -2932,91 +2940,19 @@ class ControlPanel(Gtk.Box):
         mode_row.append(self._anim_mode_repl_btn)
         self._animate_box.append(mode_row)
 
-        # ── Mode description bar ───────────────────────────────────────────────
-        # Slides down below the toggle on hover; stays anchored, never floats.
-        self._mode_desc_revealer = Gtk.Revealer()
-        self._mode_desc_revealer.set_transition_type(
-            Gtk.RevealerTransitionType.SLIDE_DOWN
+        # ── Mode description label ─────────────────────────────────────────────
+        # Single static line that updates when the mode toggle changes.
+        # Replaces the old hover-triggered SLIDE_DOWN Revealer which caused
+        # the ControlPanel to grow taller each time it animated open, forcing
+        # the user to scroll to reach the Generate button.
+        self._mode_desc_label = Gtk.Label(
+            label="💃 Motion is transferred · character appearance preserved"
         )
-        self._mode_desc_revealer.set_transition_duration(120)
-
-        self._mode_desc_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
-        self._mode_desc_bar.add_css_class("mode-desc-bar")
-
-        self._mode_desc_icon = Gtk.Label(label="💃")
-        self._mode_desc_icon.add_css_class("mode-desc-bar-icon")
-        self._mode_desc_icon.set_valign(Gtk.Align.START)
-
-        desc_text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
-        self._mode_desc_text = Gtk.Label(label="")
-        self._mode_desc_text.add_css_class("mode-desc-bar-text")
-        self._mode_desc_text.set_xalign(0)
-        self._mode_desc_text.set_wrap(True)
-        self._mode_desc_text.set_hexpand(True)
-        self._mode_desc_impact = Gtk.Label(label="")
-        self._mode_desc_impact.add_css_class("mode-desc-bar-impact")
-        self._mode_desc_impact.set_xalign(0)
-        self._mode_desc_impact.set_wrap(True)
-        desc_text_box.append(self._mode_desc_text)
-        desc_text_box.append(self._mode_desc_impact)
-
-        self._mode_desc_bar.append(self._mode_desc_icon)
-        self._mode_desc_bar.append(desc_text_box)
-        self._mode_desc_revealer.set_child(self._mode_desc_bar)
-        self._animate_box.append(self._mode_desc_revealer)
-
-        # ── Hover wiring for mode description bar ─────────────────────────────
-        # 200 ms leave delay prevents the bar from flashing when moving between
-        # the Animation and Replacement buttons.
-        self._mode_desc_leave_timer: "int | None" = None
-
-        _ANIM_ICON   = "💃"
-        _ANIM_TEXT   = (
-            "Your character performs the motion from the reference video. "
-            "Their appearance is preserved; only the movement is transferred."
-        )
-        _ANIM_IMPACT = "↳ Reference video sets the motion · Character appearance comes from your image"
-
-        _REPL_ICON   = "🔀"
-        _REPL_TEXT   = (
-            "Your character replaces the person in the reference video. "
-            "Motion, background, and timing come from the reference."
-        )
-        _REPL_IMPACT = "↳ Needs a visible person in the reference video · Background is preserved"
-
-        def _show_mode_desc(icon: str, text: str, impact: str, css_variant: str) -> None:
-            if self._mode_desc_leave_timer is not None:
-                GLib.source_remove(self._mode_desc_leave_timer)
-                self._mode_desc_leave_timer = None
-            self._mode_desc_icon.set_label(icon)
-            self._mode_desc_text.set_label(text)
-            self._mode_desc_impact.set_label(impact)
-            self._mode_desc_bar.remove_css_class("mode-desc-bar-anim")
-            self._mode_desc_bar.remove_css_class("mode-desc-bar-repl")
-            self._mode_desc_bar.add_css_class(f"mode-desc-bar-{css_variant}")
-            self._mode_desc_impact.remove_css_class("mode-desc-bar-impact-anim")
-            self._mode_desc_impact.remove_css_class("mode-desc-bar-impact-repl")
-            self._mode_desc_impact.add_css_class(f"mode-desc-bar-impact-{css_variant}")
-            self._mode_desc_revealer.set_reveal_child(True)
-
-        def _hide_mode_desc_delayed() -> None:
-            def _do_hide() -> bool:
-                self._mode_desc_revealer.set_reveal_child(False)
-                self._mode_desc_leave_timer = None
-                return GLib.SOURCE_REMOVE
-            if self._mode_desc_leave_timer is not None:
-                GLib.source_remove(self._mode_desc_leave_timer)
-            self._mode_desc_leave_timer = GLib.timeout_add(200, _do_hide)
-
-        for btn, icon, text, impact, variant in [
-            (self._anim_mode_anim_btn, _ANIM_ICON, _ANIM_TEXT, _ANIM_IMPACT, "anim"),
-            (self._anim_mode_repl_btn, _REPL_ICON, _REPL_TEXT, _REPL_IMPACT, "repl"),
-        ]:
-            mc = Gtk.EventControllerMotion()
-            mc.connect("enter", lambda _c, _x, _y, i=icon, t=text, im=impact, v=variant:
-                       _show_mode_desc(i, t, im, v))
-            mc.connect("leave", lambda _c: _hide_mode_desc_delayed())
-            btn.add_controller(mc)
+        self._mode_desc_label.set_xalign(0)
+        self._mode_desc_label.add_css_class("mode-desc-static")
+        self._mode_desc_label.set_wrap(False)
+        self._mode_desc_label.set_ellipsize(Pango.EllipsizeMode.END)
+        self._animate_box.append(self._mode_desc_label)
 
         # Animate inputs — visible only in animate mode, positioned below chips.
         # Appended here (after construction) so self._animate_box is ready.
@@ -3904,7 +3840,7 @@ class ControlPanel(Gtk.Box):
             play_btn.set_tooltip_text(f"Watch all {display} videos in TT-TV")
             play_btn.connect("clicked", lambda _b, mid=model_id: (
                 self._playlists_btn.get_popover().popdown(),
-                self._on_open_attractor_for_model(mid),
+                self._on_open_model_playlist(mid),
             ))
             row.append(play_btn)
             self._model_rows_box.append(row)
@@ -4082,17 +4018,17 @@ class ControlPanel(Gtk.Box):
 
         # Active state is handled automatically by the ToggleButton group (:checked CSS).
         if is_image:
-            self._title_lbl.set_label("TT IMAGE GENERATOR")
+            self._title_lbl.set_label("TT Local Generator")
             self._source_desc_lbl.set_label(
                 "synchronous  ·  FLUX.1-dev  ·  ~15–90 s  ·  1024×1024 JPEG"
             )
         elif is_animate:
-            self._title_lbl.set_label("TT ANIMATE GENERATOR")
+            self._title_lbl.set_label("TT Local Generator")
             self._source_desc_lbl.set_label(
                 "async job  ·  Animate-14B  ·  motion video + character"
             )
         else:
-            self._title_lbl.set_label("TT VIDEO GENERATOR")
+            self._title_lbl.set_label("TT Local Generator")
             if self._video_model == "mochi":
                 self._source_desc_lbl.set_label(
                     "async job  ·  Mochi-1  ·  ~5–15 min  ·  480×848 168-frame"
@@ -4530,6 +4466,14 @@ class ControlPanel(Gtk.Box):
     def _set_animate_mode(self, mode: str) -> None:
         # Active state handled by ToggleButton group (:checked CSS); no manual CSS needed.
         self._animate_mode = mode
+        if mode == "animation":
+            self._mode_desc_label.set_label(
+                "💃 Motion is transferred · character appearance preserved"
+            )
+        else:
+            self._mode_desc_label.set_label(
+                "🔀 Character replaces person in reference video"
+            )
 
     # ── Chips helper ───────────────────────────────────────────────────────────
 
@@ -5929,7 +5873,7 @@ class MainWindow(Gtk.ApplicationWindow):
     """Top-level window: owns client, store, workers, and the prompt queue."""
 
     def __init__(self, app: Gtk.Application, server_url: str = "http://localhost:8000"):
-        super().__init__(application=app, title="TT LOCAL GENERATOR")
+        super().__init__(application=app, title="TT Local Generator")
         self.set_default_size(1400, 800)
 
         self._alive: bool = True   # set False in do_close_request; guards idle_add callbacks
@@ -5989,6 +5933,7 @@ class MainWindow(Gtk.ApplicationWindow):
             on_inspire=self._on_inspire,
             on_theme_queue=self._on_theme,
             on_open_playlist=self._on_open_attractor_for_playlist,
+            on_open_model_playlist=self._on_open_attractor_for_model,
             on_enter_selection_mode=self._on_enter_selection_mode,
         )
         # Wire the history store so the SHOT panel seed buttons can read history.

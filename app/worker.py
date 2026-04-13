@@ -402,7 +402,7 @@ class AnimateGenerationWorker:
             except Exception:
                 persisted_ref_image = self._ref_image
 
-        record = GenerationRecord.new(
+        record = GenerationRecord.new_animate(
             job_id=job_id,
             prompt=self._prompt or f"[animate:{self._animate_mode}]",
             negative_prompt="",
