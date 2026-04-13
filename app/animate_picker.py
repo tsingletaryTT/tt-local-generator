@@ -10,6 +10,7 @@ Components:
     InputWidget         — Gtk.Button subclass for motion/character inputs (see Task 4)
     PickerPopover       — Gtk.Popover with Bundled / Gallery / Disk tabs (see Task 5)
 """
+import hashlib
 import subprocess
 from pathlib import Path
 from typing import Optional
@@ -478,6 +479,7 @@ class PickerPopover(Gtk.Popover if _GTK_AVAILABLE else object):
                 active_chip["btn"].remove_css_class("picker-cat-chip-active")
             active_chip["btn"] = btn
             btn.add_css_class("picker-cat-chip-active")
+            self._deselect_all_in_widget(grid)   # clear visual selection before repopulating
             _populate_grid(data[cat_name])
             self._set_selection(None)
 
@@ -630,7 +632,7 @@ class PickerPopover(Gtk.Popover if _GTK_AVAILABLE else object):
                 thumb_path = str(file_path)
             else:
                 # Cache video thumbnails using a hash-based name to avoid collisions
-                thumb_name = file_path.stem + "_" + str(abs(hash(str(file_path))))[:8] + ".jpg"
+                thumb_name = file_path.stem + "_" + hashlib.md5(str(file_path).encode()).hexdigest()[:8] + ".jpg"
                 thumb_path_obj = cache_dir / thumb_name
                 if not thumb_path_obj.exists():
                     extract_thumbnail(str(file_path), str(thumb_path_obj))
