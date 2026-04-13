@@ -925,6 +925,210 @@ menubar > item:selected {
     font-size: 11px;
     color: @tt_text;
 }
+
+/* -- Animate InputWidget ---------------------------------------------------- */
+.input-widget {
+    background-color: @tt_bg_dark;
+    border: 1px solid @tt_border;
+    border-radius: 4px;
+    padding: 0;
+}
+.input-widget:hover {
+    border-color: @tt_accent_light;
+}
+.input-widget-filled-motion {
+    border-color: @tt_pink;
+}
+.input-widget-filled-char {
+    border-color: @tt_accent;
+}
+.input-widget-type {
+    color: @tt_text_muted;
+    font-size: 7px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+.input-widget-name {
+    font-size: 8px;
+    color: @tt_text;
+}
+.input-widget-placeholder {
+    color: @tt_text_muted;
+    font-size: 18px;
+}
+.input-widget-thumb {
+    background-color: @tt_bg_darkest;
+    border-radius: 2px;
+}
+.input-widget-caret {
+    font-size: 8px;
+    color: @tt_text_muted;
+}
+
+/* -- Gallery card hover action bar ------------------------------------------ */
+.hover-action-bar {
+    background: linear-gradient(to top, rgba(10,30,40,0.92), transparent);
+    padding: 6px 4px 4px 4px;
+}
+.hover-action-btn {
+    border-radius: 3px;
+    padding: 2px 6px;
+    font-size: 10px;
+    font-weight: bold;
+    border: 1px solid @tt_border;
+    background-color: rgba(15,42,53,0.85);
+    min-height: 0;
+}
+.hover-action-btn label {
+    padding: 0;
+    margin: 0;
+}
+.hover-action-btn-animate {
+    color: @tt_accent;
+    border-color: @tt_accent;
+}
+.hover-action-btn-animate:hover {
+    background-color: @tt_accent;
+    color: @tt_bg_darkest;
+}
+.hover-action-btn-motion {
+    color: @tt_pink;
+    border-color: @tt_pink;
+}
+.hover-action-btn-motion:hover {
+    background-color: @tt_pink;
+    color: @tt_bg_darkest;
+}
+
+/* -- Mode description bar --------------------------------------------------- */
+.mode-desc-bar {
+    background-color: @tt_bg_dark;
+    border: 1px solid @tt_border;
+    border-top: none;
+    border-radius: 0 0 4px 4px;
+    padding: 5px 8px;
+}
+.mode-desc-bar-anim {
+    border-color: @tt_accent;
+}
+.mode-desc-bar-repl {
+    border-color: @tt_pink;
+}
+.mode-desc-bar-icon {
+    font-size: 14px;
+}
+.mode-desc-bar-text {
+    font-size: 9px;
+    color: @tt_text;
+}
+.mode-desc-bar-impact-anim {
+    font-size: 8px;
+    color: @tt_accent;
+}
+.mode-desc-bar-impact-repl {
+    font-size: 8px;
+    color: @tt_pink;
+}
+
+/* -- Picker popover --------------------------------------------------------- */
+popover.picker-popover > contents {
+    background-color: @tt_bg_darkest;
+    border: 1px solid @tt_accent;
+    border-radius: 6px;
+    padding: 0;
+}
+.picker-title {
+    font-size: 10px;
+    font-weight: bold;
+    color: @tt_accent;
+}
+.picker-tab-btn {
+    background-color: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    color: @tt_text_muted;
+    font-size: 9px;
+    padding: 3px 8px;
+    min-height: 0;
+}
+.picker-tab-btn label { padding: 0; margin: 0; }
+.picker-tab-btn:hover { color: @tt_text; border-bottom-color: @tt_border; }
+.picker-tab-btn-active {
+    color: @tt_accent;
+    border-bottom-color: @tt_accent;
+    font-weight: bold;
+}
+.picker-tab-btn-active:hover { color: @tt_accent_light; }
+.picker-thumb-cell {
+    background-color: @tt_bg_dark;
+    border: 1px solid @tt_border;
+    border-radius: 3px;
+    min-width: 60px;
+    min-height: 44px;
+}
+.picker-thumb-cell:hover { border-color: @tt_accent_light; }
+.picker-thumb-cell-selected {
+    border-color: @tt_accent;
+    border-width: 2px;
+}
+.picker-cat-chip {
+    background-color: @tt_bg_dark;
+    border: 1px solid @tt_border;
+    border-radius: 10px;
+    color: @tt_text_muted;
+    font-size: 8px;
+    padding: 2px 7px;
+    min-height: 0;
+}
+.picker-cat-chip label { padding: 0; margin: 0; }
+.picker-cat-chip:hover { border-color: @tt_accent; color: @tt_text; }
+.picker-cat-chip-active {
+    border-color: @tt_accent;
+    color: @tt_accent;
+}
+.picker-folder-row {
+    background-color: @tt_bg_dark;
+    border: 1px solid @tt_border;
+    border-radius: 3px;
+    padding: 4px 6px;
+}
+.picker-empty {
+    color: @tt_text_muted;
+    font-size: 10px;
+}
+.picker-browse-tile {
+    background-color: transparent;
+    border: 1px dashed @tt_accent;
+    border-radius: 3px;
+    color: @tt_accent;
+    font-size: 10px;
+    min-width: 60px;
+    min-height: 44px;
+}
+.picker-browse-tile label { padding: 0; margin: 0; }
+.picker-use-btn {
+    background-color: @tt_accent;
+    color: @tt_bg_darkest;
+    border-color: @tt_accent;
+    border-radius: 3px;
+    font-size: 9px;
+    font-weight: bold;
+    padding: 3px 8px;
+    min-height: 0;
+}
+.picker-use-btn label { padding: 0; margin: 0; }
+.picker-use-btn:disabled { background-color: @tt_border; color: @tt_text_muted; }
+.picker-cancel-btn {
+    background-color: @tt_bg_dark;
+    border: 1px solid @tt_border;
+    border-radius: 3px;
+    color: @tt_text_muted;
+    font-size: 9px;
+    padding: 3px 8px;
+    min-height: 0;
+}
+.picker-cancel-btn label { padding: 0; margin: 0; }
 """
 
 # ── Prompt component chips ────────────────────────────────────────────────────
