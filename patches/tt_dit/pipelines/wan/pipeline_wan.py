@@ -317,6 +317,7 @@ class WanPipeline(DiffusionPipeline, WanLoraLoaderMixin):
         pipeline_class=None,
         vae_use_cache=None,
         sdpa_t_fracture_w_only=None,
+        boundary_ratio=0.875,
     ):
         device_configs = {}
         if ttnn.device.is_blackhole():
@@ -405,7 +406,7 @@ class WanPipeline(DiffusionPipeline, WanLoraLoaderMixin):
             vae_parallel_config=vae_parallel_config,
             encoder_parallel_config=encoder_parallel_config,
             num_links=num_links or config["num_links"],
-            boundary_ratio=0.875,
+            boundary_ratio=boundary_ratio,
             scheduler=scheduler,
             dynamic_load=dynamic_load if dynamic_load is not None else config["dynamic_load"],
             topology=topology or config["topology"],
