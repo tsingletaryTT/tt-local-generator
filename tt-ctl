@@ -114,7 +114,8 @@ def _make_worker_for_item(client: "APIClient", store: "HistoryStore", item: dict
     Instantiate the correct generation worker for a queue item dict.
 
     Selects GenerationWorker, ImageGenerationWorker, or AnimateGenerationWorker
-    based on item["model_source"].  Unknown model_source values default to video.
+    based on item["model_source"].  Unknown model_source values cause cmd_queue_run
+    to warn and skip the item (leaving it in the queue).
     """
     src    = item.get("model_source", "video")
     model  = _MODEL_FOR_SRC.get(src, "wan2.2-t2v")
@@ -149,6 +150,19 @@ def _make_worker_for_item(client: "APIClient", store: "HistoryStore", item: dict
         )
 
     # video / mochi / skyreels → GenerationWorker
+    # If a seed image path is present and the file exists, encode it as a
+    # base64 data-URI so I2V models (e.g. SkyReels-V2-I2V) receive the
+    # conditioning image.  The GUI does this inline; the CLI path needs to
+    # replicate it here.
+    seed_image_path = item.get("seed_image_path", "")
+    image_b64: str | None = None
+    if seed_image_path:
+        _img = Path(seed_image_path)
+        if _img.is_file():
+            import base64 as _b64
+            _mime = "image/png" if _img.suffix.lower() == ".png" else "image/jpeg"
+            image_b64 = f"data:{_mime};base64,{_b64.b64encode(_img.read_bytes()).decode()}"
+
     return GenerationWorker(
         client=client,
         store=store,
@@ -156,9 +170,10 @@ def _make_worker_for_item(client: "APIClient", store: "HistoryStore", item: dict
         negative_prompt=neg,
         num_inference_steps=steps,
         seed=seed,
-        seed_image_path=item.get("seed_image_path", ""),
+        seed_image_path=seed_image_path,
         model=model,
         num_frames=item.get("num_frames"),
+        image=image_b64,
     )
 
 
