@@ -312,6 +312,9 @@ def _llm_guided(guide: str, prompt_type: str, timeout: int = 45) -> str | None:
     LLM the user's theme string and asks it to produce a complete cinematic prompt
     from scratch.  Returns None on any network or parse error.
     """
+    # Guard against unrecognised prompt_type — fall back to video hint rather
+    # than raising an uncaught KeyError before the try block below.
+    type_hint = _TYPE_HINT.get(prompt_type, _TYPE_HINT["video"])
     payload = json.dumps({
         "model": LLM_MODEL,
         "messages": [
@@ -326,7 +329,7 @@ def _llm_guided(guide: str, prompt_type: str, timeout: int = 45) -> str | None:
             },
             {
                 "role": "user",
-                "content": f"{_TYPE_HINT[prompt_type]}\n\nTheme: {guide}",
+                "content": f"{type_hint}\n\nTheme: {guide}",
             },
         ],
         "max_tokens": 80,

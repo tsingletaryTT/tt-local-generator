@@ -4,6 +4,8 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "app"))
 
 import generate_prompt as gp
@@ -42,8 +44,8 @@ def test_llm_guided_uses_type_hint():
     req = mock_open.call_args[0][0]
     payload = json.loads(req.data)
     user_msg = payload["messages"][1]["content"]
-    # _TYPE_HINT["skyreels"] mentions cinematic
-    assert "cinematic" in user_msg.lower() or "skyreels" in user_msg.lower() or "clip" in user_msg.lower()
+    # Verify the exact type-specific hint was injected into the user message.
+    assert gp._TYPE_HINT["skyreels"] in user_msg
 
 
 def test_llm_guided_returns_none_on_network_error():
@@ -125,3 +127,13 @@ def test_guided_generate_slug_is_guide_when_llm_up():
          patch.object(gp, "_llm_guided", return_value=polished):
         result = gp.guided_generate("coastal fog redwood", "video")
     assert result["slug"] == "coastal fog redwood"
+
+
+@pytest.mark.parametrize("ptype", ["video", "image", "animate", "skyreels", "commercial"])
+def test_guided_generate_all_types_algo_fallback(ptype):
+    """guided_generate works for all supported types in algo fallback mode."""
+    with patch.object(gp, "_llm_available", return_value=False):
+        result = gp.guided_generate("test guide", ptype, enhance=False)
+    assert result["type"] == ptype
+    assert result["source"] == "algo"
+    assert "test guide" in result["prompt"]
