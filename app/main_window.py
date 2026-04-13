@@ -2956,6 +2956,7 @@ class ControlPanel(Gtk.Box):
         self._mode_desc_text.set_wrap(True)
         self._mode_desc_text.set_hexpand(True)
         self._mode_desc_impact = Gtk.Label(label="")
+        self._mode_desc_impact.add_css_class("mode-desc-bar-impact")
         self._mode_desc_impact.set_xalign(0)
         self._mode_desc_impact.set_wrap(True)
         desc_text_box.append(self._mode_desc_text)
