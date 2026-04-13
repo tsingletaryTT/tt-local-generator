@@ -5568,7 +5568,7 @@ class MainWindow(Gtk.ApplicationWindow):
     """Top-level window: owns client, store, workers, and the prompt queue."""
 
     def __init__(self, app: Gtk.Application, server_url: str = "http://localhost:8000"):
-        super().__init__(application=app, title="TT Video Generator")
+        super().__init__(application=app, title="TT LOCAL GENERATOR")
         self.set_default_size(1400, 800)
 
         self._alive: bool = True   # set False in do_close_request; guards idle_add callbacks
