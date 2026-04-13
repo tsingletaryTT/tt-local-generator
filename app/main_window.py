@@ -41,6 +41,7 @@ from gi.repository import GdkPixbuf, GLib, Gio, Gtk, Pango
 from api_client import APIClient
 from app_settings import settings as _settings
 from chip_config import load_chips as _load_chips
+from animate_picker import InputWidget, PickerPopover
 from history_store import GenerationRecord, HistoryStore
 from worker import AnimateGenerationWorker, GenerationWorker, ImageGenerationWorker
 import attractor
@@ -925,6 +926,210 @@ menubar > item:selected {
     font-size: 11px;
     color: @tt_text;
 }
+
+/* -- Animate InputWidget ---------------------------------------------------- */
+.input-widget {
+    background-color: @tt_bg_dark;
+    border: 1px solid @tt_border;
+    border-radius: 4px;
+    padding: 0;
+}
+.input-widget:hover {
+    border-color: @tt_accent_light;
+}
+.input-widget-filled-motion {
+    border-color: @tt_pink;
+}
+.input-widget-filled-char {
+    border-color: @tt_accent;
+}
+.input-widget-type {
+    color: @tt_text_muted;
+    font-size: 7px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+.input-widget-name {
+    font-size: 8px;
+    color: @tt_text;
+}
+.input-widget-placeholder {
+    color: @tt_text_muted;
+    font-size: 18px;
+}
+.input-widget-thumb {
+    background-color: @tt_bg_darkest;
+    border-radius: 2px;
+}
+.input-widget-caret {
+    font-size: 8px;
+    color: @tt_text_muted;
+}
+
+/* -- Gallery card hover action bar ------------------------------------------ */
+.hover-action-bar {
+    background: linear-gradient(to top, rgba(10,30,40,0.92), transparent);
+    padding: 6px 4px 4px 4px;
+}
+.hover-action-btn {
+    border-radius: 3px;
+    padding: 2px 6px;
+    font-size: 10px;
+    font-weight: bold;
+    border: 1px solid @tt_border;
+    background-color: rgba(15,42,53,0.85);
+    min-height: 0;
+}
+.hover-action-btn label {
+    padding: 0;
+    margin: 0;
+}
+.hover-action-btn-animate {
+    color: @tt_accent;
+    border-color: @tt_accent;
+}
+.hover-action-btn-animate:hover {
+    background-color: @tt_accent;
+    color: @tt_bg_darkest;
+}
+.hover-action-btn-motion {
+    color: @tt_pink;
+    border-color: @tt_pink;
+}
+.hover-action-btn-motion:hover {
+    background-color: @tt_pink;
+    color: @tt_bg_darkest;
+}
+
+/* -- Mode description bar --------------------------------------------------- */
+.mode-desc-bar {
+    background-color: @tt_bg_dark;
+    border: 1px solid @tt_border;
+    border-top: none;
+    border-radius: 0 0 4px 4px;
+    padding: 5px 8px;
+}
+.mode-desc-bar-anim {
+    border-color: @tt_accent;
+}
+.mode-desc-bar-repl {
+    border-color: @tt_pink;
+}
+.mode-desc-bar-icon {
+    font-size: 14px;
+}
+.mode-desc-bar-text {
+    font-size: 9px;
+    color: @tt_text;
+}
+.mode-desc-bar-impact-anim {
+    font-size: 8px;
+    color: @tt_accent;
+}
+.mode-desc-bar-impact-repl {
+    font-size: 8px;
+    color: @tt_pink;
+}
+
+/* -- Picker popover --------------------------------------------------------- */
+popover.picker-popover > contents {
+    background-color: @tt_bg_darkest;
+    border: 1px solid @tt_accent;
+    border-radius: 6px;
+    padding: 0;
+}
+.picker-title {
+    font-size: 10px;
+    font-weight: bold;
+    color: @tt_accent;
+}
+.picker-tab-btn {
+    background-color: transparent;
+    border: none;
+    border-bottom: 2px solid transparent;
+    border-radius: 0;
+    color: @tt_text_muted;
+    font-size: 9px;
+    padding: 3px 8px;
+    min-height: 0;
+}
+.picker-tab-btn label { padding: 0; margin: 0; }
+.picker-tab-btn:hover { color: @tt_text; border-bottom-color: @tt_border; }
+.picker-tab-btn-active {
+    color: @tt_accent;
+    border-bottom-color: @tt_accent;
+    font-weight: bold;
+}
+.picker-tab-btn-active:hover { color: @tt_accent_light; }
+.picker-thumb-cell {
+    background-color: @tt_bg_dark;
+    border: 1px solid @tt_border;
+    border-radius: 3px;
+    min-width: 60px;
+    min-height: 44px;
+}
+.picker-thumb-cell:hover { border-color: @tt_accent_light; }
+.picker-thumb-cell-selected {
+    border-color: @tt_accent;
+    border-width: 2px;
+}
+.picker-cat-chip {
+    background-color: @tt_bg_dark;
+    border: 1px solid @tt_border;
+    border-radius: 10px;
+    color: @tt_text_muted;
+    font-size: 8px;
+    padding: 2px 7px;
+    min-height: 0;
+}
+.picker-cat-chip label { padding: 0; margin: 0; }
+.picker-cat-chip:hover { border-color: @tt_accent; color: @tt_text; }
+.picker-cat-chip-active {
+    border-color: @tt_accent;
+    color: @tt_accent;
+}
+.picker-folder-row {
+    background-color: @tt_bg_dark;
+    border: 1px solid @tt_border;
+    border-radius: 3px;
+    padding: 4px 6px;
+}
+.picker-empty {
+    color: @tt_text_muted;
+    font-size: 10px;
+}
+.picker-browse-tile {
+    background-color: transparent;
+    border: 1px dashed @tt_accent;
+    border-radius: 3px;
+    color: @tt_accent;
+    font-size: 10px;
+    min-width: 60px;
+    min-height: 44px;
+}
+.picker-browse-tile label { padding: 0; margin: 0; }
+.picker-use-btn {
+    background-color: @tt_accent;
+    color: @tt_bg_darkest;
+    border-color: @tt_accent;
+    border-radius: 3px;
+    font-size: 9px;
+    font-weight: bold;
+    padding: 3px 8px;
+    min-height: 0;
+}
+.picker-use-btn label { padding: 0; margin: 0; }
+.picker-use-btn:disabled { background-color: @tt_border; color: @tt_text_muted; }
+.picker-cancel-btn {
+    background-color: @tt_bg_dark;
+    border: 1px solid @tt_border;
+    border-radius: 3px;
+    color: @tt_text_muted;
+    font-size: 9px;
+    padding: 3px 8px;
+    min-height: 0;
+}
+.picker-cancel-btn label { padding: 0; margin: 0; }
 """
 
 # ── Prompt component chips ────────────────────────────────────────────────────
@@ -1123,12 +1328,15 @@ class GenerationCard(Gtk.Frame):
     delete_cb(record) is called when the trash button is clicked.
     """
 
-    def __init__(self, record: GenerationRecord, iterate_cb, select_cb, delete_cb):
+    def __init__(self, record: GenerationRecord, iterate_cb, select_cb, delete_cb,
+                 animate_cb=None, motion_cb=None):
         super().__init__()
         self._record = record
         self._iterate_cb = iterate_cb
         self._select_cb = select_cb
         self._delete_cb = delete_cb
+        self._animate_cb = animate_cb   # callable(record) or None
+        self._motion_cb  = motion_cb    # callable(record) or None — None for image cards
         self.add_css_class("card")
         # Minimum card width; FlowBox homogeneous layout makes all cells equal width
         # and expands them to fill the row, so actual width adapts to the pane size.
@@ -1141,9 +1349,10 @@ class GenerationCard(Gtk.Frame):
         gesture.connect("pressed", lambda *_: self._select_cb(self))
         self.add_controller(gesture)
 
-        # Hovering over a video card plays it in the thumbnail area.
-        # Image cards (FLUX) don't have a video to play, so no hover controller.
-        if record.video_exists:
+        # Hover controller: plays video on hover (video cards) OR shows action bar.
+        # Image cards without action callbacks don't need hover tracking at all.
+        has_hover = record.video_exists or animate_cb is not None or motion_cb is not None
+        if has_hover:
             motion = Gtk.EventControllerMotion()
             motion.connect("enter", self._on_hover_enter)
             motion.connect("leave", self._on_hover_leave)
@@ -1193,6 +1402,48 @@ class GenerationCard(Gtk.Frame):
         self._check.set_valign(Gtk.Align.START)
         self._check.set_visible(False)
         overlay.add_overlay(self._check)
+
+        # ── Hover action bar ─────────────────────────────────────────────────
+        # Gtk.Revealer(SLIDE_UP) overlaid at the bottom of the card thumbnail.
+        # Only added to the overlay when at least one action callback is present.
+        self._action_revealer = Gtk.Revealer()
+        self._action_revealer.set_transition_type(
+            Gtk.RevealerTransitionType.SLIDE_UP
+        )
+        self._action_revealer.set_transition_duration(150)
+        self._action_revealer.set_valign(Gtk.Align.END)
+        self._action_revealer.set_halign(Gtk.Align.FILL)
+        self._action_revealer.set_reveal_child(False)
+
+        action_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+        action_bar.add_css_class("hover-action-bar")
+        action_bar.set_hexpand(True)
+
+        if self._animate_cb is not None:
+            animate_btn = Gtk.Button(label="💃 Animate")
+            animate_btn.add_css_class("hover-action-btn")
+            animate_btn.add_css_class("hover-action-btn-animate")
+            animate_btn.set_can_focus(False)
+            animate_btn.connect(
+                "clicked",
+                lambda _b, rec=self._record: self._animate_cb(rec),
+            )
+            action_bar.append(animate_btn)
+
+        if self._motion_cb is not None and self._record.media_type == "video":
+            motion_btn = Gtk.Button(label="↗ Motion")
+            motion_btn.add_css_class("hover-action-btn")
+            motion_btn.add_css_class("hover-action-btn-motion")
+            motion_btn.set_can_focus(False)
+            motion_btn.connect(
+                "clicked",
+                lambda _b, rec=self._record: self._motion_cb(rec),
+            )
+            action_bar.append(motion_btn)
+
+        self._action_revealer.set_child(action_bar)
+        if self._animate_cb is not None or self._motion_cb is not None:
+            overlay.add_overlay(self._action_revealer)
 
         # Media area: thumbnail normally; hover swaps in a silent looping video preview.
         # The stack expands horizontally so the thumbnail fills the FlowBox cell width.
@@ -1338,7 +1589,9 @@ class GenerationCard(Gtk.Frame):
         self._loop_connected = False
 
     def _on_hover_enter(self, _ctrl, _x, _y) -> None:
-        """Start looping the video silently when the mouse enters the card."""
+        """Start looping the video silently when the mouse enters the card.
+        Also reveals the hover action bar (if action callbacks were provided)."""
+        self._action_revealer.set_reveal_child(True)
         if self._hover_video is None:
             return
         if not self._hover_pipeline_open:
@@ -1374,7 +1627,9 @@ class GenerationCard(Gtk.Frame):
             GLib.idle_add(stream.play)
 
     def _on_hover_leave(self, _ctrl) -> None:
-        """Stop the video and revert to the thumbnail when the mouse leaves."""
+        """Stop the video and revert to the thumbnail when the mouse leaves.
+        Also hides the hover action bar."""
+        self._action_revealer.set_reveal_child(False)
         if self._hover_video is None:
             return
         self._close_hover_pipeline()
@@ -1576,7 +1831,7 @@ class DetailPanel(Gtk.ScrolledWindow):
         try:
             from datetime import datetime as _dt
             dt = _dt.fromisoformat(record.created_at)
-            date_str = dt.strftime("%Y-%m-%d  %H:%M")
+            date_str = dt.strftime("%Y-%m-%d  %I:%M %p")
         except Exception:
             date_str = record.created_at or "—"
 
@@ -2028,13 +2283,16 @@ class GalleryWidget(Gtk.Box):
     hover-leave to minimise GStreamer resource use.
     """
 
-    def __init__(self, iterate_cb, select_cb, delete_cb, media_type: str = "video"):
+    def __init__(self, iterate_cb, select_cb, delete_cb, media_type: str = "video",
+                 animate_action_cb=None, motion_action_cb=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=0)
         self.set_vexpand(True)
         self.set_hexpand(True)
         self._iterate_cb = iterate_cb
-        self._select_cb = select_cb   # select_cb(record: GenerationRecord) called on click
-        self._delete_cb = delete_cb   # delete_cb(record: GenerationRecord) called on trash
+        self._select_cb = select_cb        # select_cb(record: GenerationRecord) called on click
+        self._delete_cb = delete_cb        # delete_cb(record: GenerationRecord) called on trash
+        self._animate_action_cb = animate_action_cb  # callable(record) or None — opens Animate dialog
+        self._motion_action_cb  = motion_action_cb   # callable(record) or None — opens Motion picker
 
         # ── Scrolled flow box ──────────────────────────────────────────────────
         # FlowBox automatically computes the number of columns that fit in the
@@ -2141,6 +2399,8 @@ class GalleryWidget(Gtk.Box):
             iterate_cb=self._iterate_cb,
             select_cb=self.select_card,
             delete_cb=self._delete_cb,
+            animate_cb=self._animate_action_cb,
+            motion_cb=self._motion_action_cb,
         )
 
     def delete_card(self, record_id: str) -> None:
@@ -2610,35 +2870,44 @@ class ControlPanel(Gtk.Box):
         _anim_title.add_css_class("animate-inputs-title")
         self._animate_box.append(_anim_title)
 
-        self._animate_box.append(self._section("Motion Video"))
-        mv_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        self._anim_video_lbl = Gtk.Label(label="none")
-        self._anim_video_lbl.add_css_class("muted")
-        self._anim_video_lbl.set_ellipsize(Pango.EllipsizeMode.START)
-        self._anim_video_lbl.set_hexpand(True)
-        self._anim_video_lbl.set_xalign(1)
-        self._anim_video_lbl.set_tooltip_text("Reference video supplying the motion pattern")
-        mv_row.append(self._anim_video_lbl)
-        anim_video_btn = Gtk.Button(label="Browse…")
-        anim_video_btn.set_tooltip_text("Pick an MP4 motion source video")
-        anim_video_btn.connect("clicked", self._pick_ref_video)
-        mv_row.append(anim_video_btn)
-        self._animate_box.append(mv_row)
+        # ── Motion Video + Character inputs (side-by-side InputWidgets) ─────────
+        # These replace the old Browse-button rows; PickerPopover is created fresh
+        # on each click so HistoryStore records are always up-to-date.
+        inputs_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
 
-        self._animate_box.append(self._section("Character Image"))
-        ci_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-        self._anim_char_lbl = Gtk.Label(label="none")
-        self._anim_char_lbl.add_css_class("muted")
-        self._anim_char_lbl.set_ellipsize(Pango.EllipsizeMode.START)
-        self._anim_char_lbl.set_hexpand(True)
-        self._anim_char_lbl.set_xalign(1)
-        self._anim_char_lbl.set_tooltip_text("Character image to animate")
-        ci_row.append(self._anim_char_lbl)
-        anim_char_btn = Gtk.Button(label="Browse…")
-        anim_char_btn.set_tooltip_text("Pick a character image (PNG/JPG)")
-        anim_char_btn.connect("clicked", self._pick_ref_image)
-        ci_row.append(anim_char_btn)
-        self._animate_box.append(ci_row)
+        self._motion_input = InputWidget("motion", "MOTION VIDEO")
+        self._char_input   = InputWidget("char",   "CHARACTER")
+
+        inputs_row.append(self._motion_input)
+        inputs_row.append(self._char_input)
+        self._animate_box.append(inputs_row)
+
+        def _open_motion_picker(_btn):
+            clips_dir = str(Path(__file__).parent / "assets" / "motion_clips")
+            picker = PickerPopover(
+                widget_type="motion",
+                clips_dir=clips_dir,
+                history_records=self._store.all_records() if hasattr(self, "_store") else [],
+                settings=_settings,
+                on_select=self.set_motion_input,
+            )
+            picker.set_parent(self._motion_input)
+            picker.popup()
+
+        def _open_char_picker(_btn):
+            clips_dir = str(Path(__file__).parent / "assets" / "motion_clips")
+            picker = PickerPopover(
+                widget_type="char",
+                clips_dir=clips_dir,
+                history_records=self._store.all_records() if hasattr(self, "_store") else [],
+                settings=_settings,
+                on_select=self.set_char_input,
+            )
+            picker.set_parent(self._char_input)
+            picker.popup()
+
+        self._motion_input.connect("clicked", _open_motion_picker)
+        self._char_input.connect("clicked", _open_char_picker)
 
         self._animate_box.append(self._section("Animation Mode"))
         mode_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
@@ -2662,6 +2931,92 @@ class ControlPanel(Gtk.Box):
         mode_row.append(self._anim_mode_anim_btn)
         mode_row.append(self._anim_mode_repl_btn)
         self._animate_box.append(mode_row)
+
+        # ── Mode description bar ───────────────────────────────────────────────
+        # Slides down below the toggle on hover; stays anchored, never floats.
+        self._mode_desc_revealer = Gtk.Revealer()
+        self._mode_desc_revealer.set_transition_type(
+            Gtk.RevealerTransitionType.SLIDE_DOWN
+        )
+        self._mode_desc_revealer.set_transition_duration(120)
+
+        self._mode_desc_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        self._mode_desc_bar.add_css_class("mode-desc-bar")
+
+        self._mode_desc_icon = Gtk.Label(label="💃")
+        self._mode_desc_icon.add_css_class("mode-desc-bar-icon")
+        self._mode_desc_icon.set_valign(Gtk.Align.START)
+
+        desc_text_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=1)
+        self._mode_desc_text = Gtk.Label(label="")
+        self._mode_desc_text.add_css_class("mode-desc-bar-text")
+        self._mode_desc_text.set_xalign(0)
+        self._mode_desc_text.set_wrap(True)
+        self._mode_desc_text.set_hexpand(True)
+        self._mode_desc_impact = Gtk.Label(label="")
+        self._mode_desc_impact.add_css_class("mode-desc-bar-impact")
+        self._mode_desc_impact.set_xalign(0)
+        self._mode_desc_impact.set_wrap(True)
+        desc_text_box.append(self._mode_desc_text)
+        desc_text_box.append(self._mode_desc_impact)
+
+        self._mode_desc_bar.append(self._mode_desc_icon)
+        self._mode_desc_bar.append(desc_text_box)
+        self._mode_desc_revealer.set_child(self._mode_desc_bar)
+        self._animate_box.append(self._mode_desc_revealer)
+
+        # ── Hover wiring for mode description bar ─────────────────────────────
+        # 200 ms leave delay prevents the bar from flashing when moving between
+        # the Animation and Replacement buttons.
+        self._mode_desc_leave_timer: "int | None" = None
+
+        _ANIM_ICON   = "💃"
+        _ANIM_TEXT   = (
+            "Your character performs the motion from the reference video. "
+            "Their appearance is preserved; only the movement is transferred."
+        )
+        _ANIM_IMPACT = "↳ Reference video sets the motion · Character appearance comes from your image"
+
+        _REPL_ICON   = "🔀"
+        _REPL_TEXT   = (
+            "Your character replaces the person in the reference video. "
+            "Motion, background, and timing come from the reference."
+        )
+        _REPL_IMPACT = "↳ Needs a visible person in the reference video · Background is preserved"
+
+        def _show_mode_desc(icon: str, text: str, impact: str, css_variant: str) -> None:
+            if self._mode_desc_leave_timer is not None:
+                GLib.source_remove(self._mode_desc_leave_timer)
+                self._mode_desc_leave_timer = None
+            self._mode_desc_icon.set_label(icon)
+            self._mode_desc_text.set_label(text)
+            self._mode_desc_impact.set_label(impact)
+            self._mode_desc_bar.remove_css_class("mode-desc-bar-anim")
+            self._mode_desc_bar.remove_css_class("mode-desc-bar-repl")
+            self._mode_desc_bar.add_css_class(f"mode-desc-bar-{css_variant}")
+            self._mode_desc_impact.remove_css_class("mode-desc-bar-impact-anim")
+            self._mode_desc_impact.remove_css_class("mode-desc-bar-impact-repl")
+            self._mode_desc_impact.add_css_class(f"mode-desc-bar-impact-{css_variant}")
+            self._mode_desc_revealer.set_reveal_child(True)
+
+        def _hide_mode_desc_delayed() -> None:
+            def _do_hide() -> bool:
+                self._mode_desc_revealer.set_reveal_child(False)
+                self._mode_desc_leave_timer = None
+                return GLib.SOURCE_REMOVE
+            if self._mode_desc_leave_timer is not None:
+                GLib.source_remove(self._mode_desc_leave_timer)
+            self._mode_desc_leave_timer = GLib.timeout_add(200, _do_hide)
+
+        for btn, icon, text, impact, variant in [
+            (self._anim_mode_anim_btn, _ANIM_ICON, _ANIM_TEXT, _ANIM_IMPACT, "anim"),
+            (self._anim_mode_repl_btn, _REPL_ICON, _REPL_TEXT, _REPL_IMPACT, "repl"),
+        ]:
+            mc = Gtk.EventControllerMotion()
+            mc.connect("enter", lambda _c, _x, _y, i=icon, t=text, im=impact, v=variant:
+                       _show_mode_desc(i, t, im, v))
+            mc.connect("leave", lambda _c: _hide_mode_desc_delayed())
+            btn.add_controller(mc)
 
         # Animate inputs — visible only in animate mode, positioned below chips.
         # Appended here (after construction) so self._animate_box is ready.
@@ -4118,7 +4473,19 @@ class ControlPanel(Gtk.Box):
         """
         self._set_seed_image("")
 
-    # ── Animate file pickers ───────────────────────────────────────────────────
+    # ── Animate input setters (public API used by PickerPopover callbacks) ────
+
+    def set_motion_input(self, path: str) -> None:
+        """Set the Motion Video InputWidget and internal ref_video_path."""
+        self._ref_video_path = path
+        self._motion_input.set_value(path)
+
+    def set_char_input(self, path: str) -> None:
+        """Set the Character InputWidget and internal ref_char_path."""
+        self._ref_char_path = path
+        self._char_input.set_value(path)
+
+    # ── Animate file pickers (fallback Browse dialogs) ────────────────────────
 
     def _pick_ref_video(self, _btn) -> None:
         dlg = Gtk.FileDialog()
@@ -4138,10 +4505,7 @@ class ControlPanel(Gtk.Box):
             return
         path = gfile.get_path()
         if path:
-            self._ref_video_path = path
-            self._anim_video_lbl.set_label(Path(path).name)
-            self._anim_video_lbl.remove_css_class("muted")
-            self._anim_video_lbl.set_tooltip_text(path)
+            self.set_motion_input(path)
 
     def _pick_ref_image(self, _btn) -> None:
         dlg = Gtk.FileDialog()
@@ -4161,10 +4525,7 @@ class ControlPanel(Gtk.Box):
             return
         path = gfile.get_path()
         if path:
-            self._ref_char_path = path
-            self._anim_char_lbl.set_label(Path(path).name)
-            self._anim_char_lbl.remove_css_class("muted")
-            self._anim_char_lbl.set_tooltip_text(path)
+            self.set_char_input(path)
 
     def _set_animate_mode(self, mode: str) -> None:
         # Active state handled by ToggleButton group (:checked CSS); no manual CSS needed.
@@ -5572,6 +5933,8 @@ class MainWindow(Gtk.ApplicationWindow):
         self.set_default_size(1400, 800)
 
         self._alive: bool = True   # set False in do_close_request; guards idle_add callbacks
+        self._flash_restore_id: int = 0   # GLib timer id for pending _flash_status restore
+        self._flash_baseline: str = ""    # status label text captured before current flash burst
         self._client = APIClient(server_url)
         self._store = HistoryStore()
         self._worker: Optional[threading.Thread] = None
@@ -5693,10 +6056,12 @@ class MainWindow(Gtk.ApplicationWindow):
             iterate_cb=self._controls.populate_prompts,
             select_cb=self._on_card_selected,
             delete_cb=self._on_delete_card,
+            animate_action_cb=self._on_animate_card_action,
+            motion_action_cb=self._on_motion_card_action,
         )
-        self._video_gallery = GalleryWidget(**shared_cbs, media_type="video")
+        self._video_gallery   = GalleryWidget(**shared_cbs, media_type="video")
         self._animate_gallery = GalleryWidget(**shared_cbs, media_type="video")
-        self._image_gallery = GalleryWidget(**shared_cbs, media_type="image")
+        self._image_gallery   = GalleryWidget(**shared_cbs, media_type="image")
         self._gallery_stack.add_named(self._video_gallery, "video")
         self._gallery_stack.add_named(self._animate_gallery, "animate")
         self._gallery_stack.add_named(self._image_gallery, "image")
@@ -5787,6 +6152,56 @@ class MainWindow(Gtk.ApplicationWindow):
     def _set_status(self, text: str) -> None:
         """Update status bar. Safe to call from main thread only."""
         self._status_lbl.set_label(text)
+
+    def _on_animate_card_action(self, record: "GenerationRecord") -> None:
+        """
+        '💃 Animate' gallery card action.
+        Switches to animate source and copies the card's thumbnail as the character image.
+        The thumbnail is a first-frame still for videos — valid as a character seed.
+        """
+        # Set character image first so the widget is populated before the tab
+        # becomes visible — avoids a visible blank-then-filled transition.
+        char_path = record.thumbnail_path if record.thumbnail_exists else record.media_file_path
+        if char_path and Path(char_path).exists():
+            self._controls.set_char_input(char_path)
+        # Switch to the animate source tab after the input is set
+        self._controls.switch_to_source("animate")
+        # Flash status
+        self._flash_status("Character set ✓")
+
+    def _on_motion_card_action(self, record: "GenerationRecord") -> None:
+        """
+        '↗ Motion' gallery card action.
+        Sets the card's video_path as the motion video input WITHOUT switching source.
+        Only video/animate cards have this button (image cards don't).
+        """
+        if record.video_exists:
+            self._controls.set_motion_input(record.video_path)
+            self._flash_status("Motion set ✓")
+        else:
+            self._flash_status("Video file not found")
+
+    def _flash_status(self, message: str, duration_ms: int = 1500) -> None:
+        """Show *message* in the status label for *duration_ms* ms, then restore.
+
+        Overlapping calls cancel the pending restore to preserve the pre-flash
+        baseline.  The baseline is captured only on the *first* call in a burst;
+        subsequent calls within the same burst cancel the previous timer and
+        extend the duration without losing the original label text.
+        """
+        if self._flash_restore_id:
+            GLib.source_remove(self._flash_restore_id)
+            self._flash_restore_id = 0
+        else:
+            # First flash in this burst — capture the true baseline label
+            self._flash_baseline = self._status_lbl.get_label()
+        self._status_lbl.set_label(message)
+        def _restore() -> bool:
+            self._flash_restore_id = 0
+            if self._alive:
+                self._status_lbl.set_label(self._flash_baseline)
+            return GLib.SOURCE_REMOVE
+        self._flash_restore_id = GLib.timeout_add(duration_ms, _restore)
 
     # ── Menu bar ───────────────────────────────────────────────────────────────
 
@@ -7251,6 +7666,8 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def do_close_request(self) -> bool:
         self._alive = False   # stop any pending GLib.idle_add callbacks from touching widgets
+        if self._flash_restore_id:
+            GLib.source_remove(self._flash_restore_id)
         self._health_stop.set()
         if self._pg_stop:
             self._pg_stop.set()
