@@ -304,6 +304,88 @@ def _llm_polish(slug: str, prompt_type: str, timeout: int = 45) -> str | None:
         return None
 
 
+def _llm_guided(guide: str, prompt_type: str, timeout: int = 45) -> str | None:
+    """
+    Ask the prompt server to generate a fresh prompt inspired by a guiding theme.
+
+    Unlike _llm_polish (which rewrites an existing slug), this function gives the
+    LLM the user's theme string and asks it to produce a complete cinematic prompt
+    from scratch.  Returns None on any network or parse error.
+    """
+    payload = json.dumps({
+        "model": LLM_MODEL,
+        "messages": [
+            {
+                "role": "system",
+                "content": (
+                    "You are a cinematic prompt writer for AI video generation. "
+                    "Write one tight, vivid prompt inspired by the theme below. "
+                    "Hard limit: 25 words. No preamble, no quotes, no explanation. "
+                    "Never add gore, body horror, graphic violence, or disturbing imagery."
+                ),
+            },
+            {
+                "role": "user",
+                "content": f"{_TYPE_HINT[prompt_type]}\n\nTheme: {guide}",
+            },
+        ],
+        "max_tokens": 80,
+        "temperature": 0.70,
+        "top_p": 0.90,
+    }).encode()
+
+    req = urllib.request.Request(
+        LLM_URL,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            resp = json.loads(r.read())
+        return resp["choices"][0]["message"]["content"].strip()
+    except (urllib.error.URLError, KeyError, json.JSONDecodeError, TimeoutError):
+        return None
+
+
+def guided_generate(
+    guide: str,
+    prompt_type: str = "video",
+    enhance: bool = True,
+) -> dict:
+    """
+    Generate one prompt centred on a user-supplied guiding theme.
+
+    When the Qwen prompt server is up and enhance=True, sends the guide to the
+    LLM and asks it to write a complete cinematic prompt around that theme.
+    Falls back to an algorithmic slug with the guide prepended if the server is
+    down or returns an error.
+
+    Returns the same schema as generate():
+        {"prompt": str, "type": str, "source": "llm"|"algo", "slug": str}
+    """
+    if enhance and _llm_available():
+        polished = _llm_guided(guide, prompt_type)
+        if polished:
+            return {
+                "prompt": polished,
+                "type": prompt_type,
+                "source": "llm",
+                "slug": guide,
+            }
+
+    # Fallback: algo slug with guide prepended so the user's intent is preserved.
+    algo_fn = _ALGO_FN.get(prompt_type, _algo_video)
+    slug_base, _ = algo_fn()
+    slug = f"{guide}; {slug_base}"
+    return {
+        "prompt": slug,
+        "type": prompt_type,
+        "source": "algo",
+        "slug": slug,
+    }
+
+
 # ── Top-level generator ───────────────────────────────────────────────────────
 
 def generate(
