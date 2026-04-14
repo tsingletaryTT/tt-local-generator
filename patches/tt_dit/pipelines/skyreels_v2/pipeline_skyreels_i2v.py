@@ -37,7 +37,7 @@
 #   - UMT5 tokenizer: loaded from google/umt5-xxl/ subfolder in the I2V checkpoint
 #   - CLIP encoder: _DummyCLIPImageEncoder (returns zeros); TTNN transformer
 #                   ignores encoder_hidden_states_image anyway
-#   - Scheduler:    UniPCMultistepScheduler, flow_shift=5.0 (I2V default)
+#   - Scheduler:    UniPCMultistepScheduler, flow_shift=7.0
 #
 # Mount path (via run_docker_server.py tt_dit hotpatch mechanism, --dev-mode):
 #   patches/tt_dit/pipelines/skyreels_v2/pipeline_skyreels_i2v.py
@@ -799,7 +799,7 @@ def _build_diffusers_i2v_pipeline(checkpoint_path: str, ttnn_transformer):
                            weights from Wan2.1_VAE.pth
       - CLIP encoder:      _DummyCLIPImageEncoder (returns zeros; TTNN ignores it)
       - CLIPProcessor:     CLIPImageProcessor with standard ViT-H/14 preprocessing
-      - Scheduler:         UniPCMultistepScheduler, flow_shift=5.0
+      - Scheduler:         UniPCMultistepScheduler, flow_shift=7.0
     """
     from diffusers import AutoencoderKLWan, UniPCMultistepScheduler
     from diffusers.image_processor import VaeImageProcessor
@@ -856,12 +856,14 @@ def _build_diffusers_i2v_pipeline(checkpoint_path: str, ttnn_transformer):
 
     # ── Scheduler ───────────────────────────────────────────────────────────
     # Borrow the scheduler config from WAN 2.2 then override flow_shift.
-    # I2V uses flow_shift=5.0 (T2V uses 8.0).
+    # I2V uses flow_shift=7.0.  The upstream default of 5.0 is too gentle —
+    # it produces soft, low-contrast outputs.  7.0 matches the DF-1.3B range
+    # and gives noticeably sharper structure without over-saturating motion.
     scheduler_base = UniPCMultistepScheduler.from_pretrained(
         _WAN22_ARCH_CHECKPOINT, subfolder="scheduler"
     )
     scheduler = UniPCMultistepScheduler.from_config(
-        scheduler_base.config, flow_shift=5.0
+        scheduler_base.config, flow_shift=7.0
     )
 
     # ── CLIP image encoder (dummy) ───────────────────────────────────────────

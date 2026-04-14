@@ -72,7 +72,21 @@ class TTSkyReelsI2VRunner(BaseMetalDeviceRunner):
     DEFAULT_WIDTH           = 960
     DEFAULT_HEIGHT          = 544
     DEFAULT_NUM_FRAMES      = 97    # ≈4 seconds @ 24fps
-    DEFAULT_GUIDANCE_SCALE  = 5.0  # SkyReels I2V recommended: 5-7
+    DEFAULT_GUIDANCE_SCALE  = 6.5  # SkyReels I2V recommended: 5-7; 6.5 balances
+                                    # prompt adherence vs naturalness given that
+                                    # CLIP cross-attn is dropped in this pipeline.
+
+    # Default negative prompt applied when the request doesn't supply one.
+    # Without CLIP cross-attention the model needs stronger CFG guidance to
+    # stay on-prompt; an explicit negative prompt helps steer away from the
+    # most common failure modes (blur, static frames, anatomical distortion).
+    DEFAULT_NEGATIVE_PROMPT = (
+        "blurry, low quality, low resolution, static, motionless, frozen, "
+        "distorted, disfigured, deformed, ugly, overexposed, washed out, "
+        "JPEG artifacts, watermark, text, subtitles, bad anatomy, "
+        "disconnected limbs, extra fingers, poorly drawn hands, "
+        "flickering, jittery, noise, grain"
+    )
 
     def __init__(self, device_id: str):
         super().__init__(device_id)
@@ -218,6 +232,10 @@ class TTSkyReelsI2VRunner(BaseMetalDeviceRunner):
         width          = int(getattr(request, "width",         None) or self.DEFAULT_WIDTH)
         height         = int(getattr(request, "height",        None) or self.DEFAULT_HEIGHT)
         guidance_scale = float(getattr(request, "guidance_scale", None) or self.DEFAULT_GUIDANCE_SCALE)
+        # Use the request negative prompt if provided; fall back to our default.
+        # The default steers away from common failure modes (blur, static, distortion)
+        # that become more likely when CLIP cross-attention is not active.
+        negative_prompt = request.negative_prompt or self.DEFAULT_NEGATIVE_PROMPT
 
         # Decode the conditioning image
         image = _decode_image(getattr(request, "image", None), self.logger)
@@ -225,7 +243,7 @@ class TTSkyReelsI2VRunner(BaseMetalDeviceRunner):
         frames = self.pipeline(
             image=image,
             prompt=request.prompt or "",
-            negative_prompt=request.negative_prompt or "",
+            negative_prompt=negative_prompt,
             height=height,
             width=width,
             num_frames=num_frames,
