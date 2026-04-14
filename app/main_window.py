@@ -1797,19 +1797,38 @@ class DetailPanel(Gtk.ScrolledWindow):
             full_btn.set_tooltip_text("Open in maximized window (F for true fullscreen)")
             full_btn.connect("clicked", self._open_fullscreen)
             ctrl_row.append(full_btn)
+            # "Open in system player" — fallback for macOS where GStreamer/GTK
+            # video backend may not be available (shows blank frame in Gtk.Video).
+            ext_btn = Gtk.Button(label="⧉ Open externally")
+            ext_btn.set_tooltip_text(
+                "Open the video in the system default player (e.g. QuickTime on macOS, "
+                "totem/mpv on Linux) — useful if inline playback is blank."
+            )
+            ext_btn.connect("clicked", self._open_external)
+            ctrl_row.append(ext_btn)
             content.append(ctrl_row)
         else:
             # Video file missing — show large thumbnail or placeholder, and
-            # offer a download button if the server callback is available.
+            # offer a download button if there is any download source available.
             if record.thumbnail_exists:
                 thumb = _make_image_widget(record.thumbnail_path, _DETAIL_VIDEO_W, _DETAIL_VIDEO_H)
             else:
                 thumb = _make_image_widget("", _DETAIL_VIDEO_W, _DETAIL_VIDEO_H, "🎬\n(video not cached)")
             content.append(thumb)
-            if self._download_cb and record.id:
+            # Show download button when: inventory URL present (remote record)
+            # OR inference-server download callback available with a job ID.
+            inv_url = record.extra_meta.get("_inventory_video_url", "") if record.extra_meta else ""
+            has_download = bool(inv_url) or (self._download_cb and record.id)
+            if has_download:
                 dl_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
-                dl_btn = Gtk.Button(label="⬇ Download from server")
-                dl_btn.set_tooltip_text("Download this video from the inference server and cache it locally")
+                if inv_url:
+                    label = "⬇ Download from remote library"
+                    tip   = "Download this video from the remote inventory server and cache it locally"
+                else:
+                    label = "⬇ Download from server"
+                    tip   = "Download this video from the inference server and cache it locally"
+                dl_btn = Gtk.Button(label=label)
+                dl_btn.set_tooltip_text(tip)
                 dl_btn.connect("clicked", self._on_download_video)
                 dl_row.append(dl_btn)
                 content.append(dl_row)
@@ -1987,23 +2006,79 @@ class DetailPanel(Gtk.ScrolledWindow):
             win.present()
 
     def _on_download_video(self, btn) -> None:
-        """Download the selected record's video from the server and reload the panel."""
-        if not self._record or not self._download_cb:
+        """Download the selected record's video and reload the panel.
+
+        Priority:
+        1. If the record has an ``_inventory_video_url`` in extra_meta (remote
+           library record), stream from the inventory server.
+        2. Otherwise use the inference-server download callback (local history
+           record whose job file the server still has on disk).
+        """
+        if not self._record:
             return
         btn.set_sensitive(False)
         btn.set_label("⬇ Downloading…")
         record = self._record
         iterate_cb = self._iterate_cb
 
+        inv_video_url  = (record.extra_meta or {}).get("_inventory_video_url", "")
+        inv_thumb_url  = (record.extra_meta or {}).get("_inventory_thumbnail_url", "")
+
         def _do_download():
             try:
-                self._download_cb(record.id, Path(record.video_path))
+                dest = Path(record.video_path)
+                dest.parent.mkdir(parents=True, exist_ok=True)
+
+                if inv_video_url:
+                    # Remote inventory record — stream from the inventory server.
+                    import requests as _req
+                    r = _req.get(inv_video_url, stream=True, timeout=60)
+                    r.raise_for_status()
+                    with open(dest, "wb") as fh:
+                        for chunk in r.iter_content(65_536):
+                            fh.write(chunk)
+                    # Also cache the thumbnail if not already present.
+                    thumb_dest = Path(record.thumbnail_path)
+                    if inv_thumb_url and not thumb_dest.exists():
+                        try:
+                            tr = _req.get(inv_thumb_url, stream=True, timeout=10)
+                            if tr.status_code == 200:
+                                thumb_dest.parent.mkdir(parents=True, exist_ok=True)
+                                with open(thumb_dest, "wb") as fh:
+                                    for chunk in tr.iter_content(65_536):
+                                        fh.write(chunk)
+                        except Exception:
+                            pass  # thumbnail cache failure is non-fatal
+                elif self._download_cb and record.id:
+                    # Local history record — use the inference-server API.
+                    self._download_cb(record.id, dest)
+                else:
+                    raise RuntimeError("No download source available for this record")
+
                 GLib.idle_add(self.show_record, record, iterate_cb)
             except Exception as exc:
                 GLib.idle_add(btn.set_label, f"Download failed: {exc}")
                 GLib.idle_add(btn.set_sensitive, True)
 
         threading.Thread(target=_do_download, daemon=True).start()
+
+    def _open_external(self, _btn) -> None:
+        """Open the video in the system default player.
+
+        Useful on macOS where GStreamer / the GTK video backend may not be
+        available, causing Gtk.Video to show a blank frame.
+        """
+        if not self._record or not self._record.video_exists:
+            return
+        import platform, subprocess  # noqa: PLC0415
+        path = self._record.video_path
+        try:
+            if platform.system() == "Darwin":
+                subprocess.Popen(["open", path])
+            else:
+                subprocess.Popen(["xdg-open", path])
+        except Exception:
+            pass
 
     def _open_image_fullscreen(self, _btn) -> None:
         if self._record and self._record.image_exists:
@@ -2416,6 +2491,16 @@ class GalleryWidget(Gtk.Box):
             self._relayout()
 
     def load_history(self, records) -> None:
+        """Replace all GenerationCards with cards built from *records*.
+
+        Any PendingCard (in-flight generation) is preserved at position 0.
+        Calling this method twice is safe — the second call replaces, not
+        appends, so there are no duplicate cards after a gallery refresh.
+        """
+        # Preserve in-flight pending card so active generations survive a refresh.
+        preserved = [c for c in self._cards if isinstance(c, PendingCard)]
+        self._cards = preserved  # clear all GenerationCards
+
         seen: set = set()
         for record in records:
             if record.id in seen:
@@ -5760,7 +5845,8 @@ class MainWindow(Gtk.ApplicationWindow):
     """Top-level window: owns client, store, workers, and the prompt queue."""
 
     def __init__(self, app: Gtk.Application, server_url: str = "http://localhost:8000",
-                 prompt_server_url: str = "http://127.0.0.1:8001"):
+                 prompt_server_url: str = "http://127.0.0.1:8001",
+                 inventory_url: str = ""):
         super().__init__(application=app, title="TT Local Generator")
         self.set_default_size(1400, 800)
 
@@ -5769,6 +5855,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self._flash_baseline: str = ""    # status label text captured before current flash burst
         self._client = APIClient(server_url)
         self._prompt_server_url = prompt_server_url
+        self._inventory_url = inventory_url  # e.g. "http://remote:8002" or "" for local-only
         # Patch generate_prompt module globals so LLM calls hit the right host.
         prompt_client.configure_llm_url(prompt_server_url)
         self._store = HistoryStore()
@@ -5788,12 +5875,17 @@ class MainWindow(Gtk.ApplicationWindow):
         self._gen_completed_count: int = 0          # incremented in _on_finished; triggers sleep
         self._screensaver_inhibit_cookie: "int | None" = None  # D-Bus inhibit cookie
         self._prefs_dialog: "PreferencesDialog | None" = None  # singleton instance
+        # Remote inventory records fetched from the inventory server (if running).
+        # These are shown alongside local records; keyed by record ID to avoid duplicates.
+        self._remote_records: dict = {}  # {record.id: GenerationRecord}
 
         self._build_ui()
         self._load_history()
         self._restore_queue()
         self._start_health_worker()
         self._start_prompt_gen_health_worker()
+        if self._inventory_url:
+            self._start_inventory_fetch()
 
         # Apply persisted quality preference — drives self._steps and QUALITY buttons.
         saved_steps = int(_settings.get("quality_steps"))
@@ -6347,10 +6439,17 @@ class MainWindow(Gtk.ApplicationWindow):
         self._set_status(f'Deleted: "{short}"')
 
     def _load_history(self) -> None:
-        records = self._store.all_records()
+        local_records = self._store.all_records()
+        # Merge remote records, excluding any whose ID already exists locally.
+        local_ids = {r.id for r in local_records}
+        remote_records = [r for r in self._remote_records.values()
+                          if r.id not in local_ids]
+        records = local_records + remote_records
         if not records:
             return
         # Route each record to the gallery that matches its media type.
+        # GalleryWidget.load_history() replaces existing cards rather than
+        # appending, so calling this method more than once is safe.
         video_recs   = [r for r in records if r.media_type == "video"]
         animate_recs = [r for r in records if r.media_type == "animate"]
         image_recs   = [r for r in records if r.media_type == "image"]
@@ -6360,7 +6459,14 @@ class MainWindow(Gtk.ApplicationWindow):
             self._animate_gallery.load_history(animate_recs)
         if image_recs:
             self._image_gallery.load_history(image_recs)
-        self._set_status(f"Loaded {len(records)} previous generation(s)")
+        n_remote = len(remote_records)
+        n_local  = len(local_records)
+        if n_remote:
+            self._set_status(
+                f"Loaded {n_local} local + {n_remote} remote generation(s)"
+            )
+        else:
+            self._set_status(f"Loaded {n_local} previous generation(s)")
         self._update_attractor_btn()
 
     # ── Health worker ──────────────────────────────────────────────────────────
@@ -6510,6 +6616,134 @@ class MainWindow(Gtk.ApplicationWindow):
             return False
         self._controls.set_prompt_gen_state(ready)
         return False  # one-shot idle callback
+
+    # ── Remote inventory ────────────────────────────────────────────────────────
+
+    def _start_inventory_fetch(self) -> None:
+        """Start a one-shot background thread to fetch the remote inventory.
+
+        Called at startup when --server points at a non-localhost host and the
+        inventory URL (port 8002) is derived automatically by main.py.
+        If the inventory server is not running the fetch silently fails.
+        """
+        threading.Thread(
+            target=self._fetch_remote_inventory, daemon=True
+        ).start()
+
+    def _fetch_remote_inventory(self) -> None:
+        """Fetch records from the remote inventory server (background thread).
+
+        For each remote record not already in the local history store, a
+        synthetic GenerationRecord is created with:
+          - Local cache paths (under ~/.local/share/tt-video-gen/remote-cache/)
+          - extra_meta["_is_remote"] = True
+          - extra_meta["_inventory_video_url"] / _inventory_thumbnail_url
+
+        Thumbnails are downloaded eagerly so gallery cards render immediately.
+        Videos are lazy — downloaded only when the user clicks the Download button.
+        """
+        import requests as _req  # noqa: PLC0415
+        url = self._inventory_url.rstrip("/") + "/inventory/records"
+        try:
+            resp = _req.get(url, timeout=10)
+            resp.raise_for_status()
+            raw_records: list = resp.json()
+        except Exception as exc:
+            import logging as _log  # noqa: PLC0415
+            _log.getLogger(__name__).warning(
+                "inventory fetch failed (%s): %s", self._inventory_url, exc
+            )
+            return
+
+        from history_store import GenerationRecord  # noqa: PLC0415
+        from urllib.parse import urlparse as _up     # noqa: PLC0415
+
+        host = _up(self._inventory_url).hostname or "remote"
+        # Cache directory for this remote host
+        from history_store import STORAGE_DIR  # noqa: PLC0415
+        cache_root = STORAGE_DIR / "remote-cache" / host
+
+        fetched: dict = {}
+        for raw in raw_records:
+            rec_id = raw.get("id", "")
+            if not rec_id:
+                continue
+
+            media_type = raw.get("media_type", "video")
+            video_url  = raw.get("video_url", "")
+            thumb_url  = raw.get("thumbnail_url", "")
+            image_url  = raw.get("image_url", "")
+
+            # Build local cache paths for this remote record.
+            def _cache_name(url: str) -> str:
+                return Path(_up(url).path).name if url else ""
+
+            v_name = _cache_name(video_url)
+            t_name = _cache_name(thumb_url)
+            i_name = _cache_name(image_url)
+
+            video_dest = str(cache_root / "videos"     / v_name) if v_name else ""
+            thumb_dest = str(cache_root / "thumbnails" / t_name) if t_name else ""
+            image_dest = str(cache_root / "images"     / i_name) if i_name else ""
+
+            # Eagerly download thumbnail (small, needed for gallery card display).
+            if thumb_url and thumb_dest and not Path(thumb_dest).exists():
+                try:
+                    Path(thumb_dest).parent.mkdir(parents=True, exist_ok=True)
+                    tr = _req.get(thumb_url, stream=True, timeout=15)
+                    if tr.status_code == 200:
+                        with open(thumb_dest, "wb") as fh:
+                            for chunk in tr.iter_content(65_536):
+                                fh.write(chunk)
+                except Exception:
+                    thumb_dest = ""  # cache failure — card will show placeholder
+
+            # Check whether the video was already cached from a previous session.
+            if video_dest and Path(video_dest).exists():
+                v_path = video_dest  # already cached — no download needed on select
+            else:
+                # Not cached — use the remote URL; DetailPanel shows Download button.
+                v_path = video_dest  # path doesn't exist yet → video_exists = False
+
+            rec = GenerationRecord(
+                id=rec_id,
+                prompt=raw.get("prompt", ""),
+                negative_prompt=raw.get("negative_prompt", ""),
+                num_inference_steps=int(raw.get("num_inference_steps", 0)),
+                seed=int(raw.get("seed", -1)),
+                video_path=v_path,
+                thumbnail_path=thumb_dest,
+                image_path=image_dest,
+                created_at=raw.get("created_at", ""),
+                duration_s=float(raw.get("duration_s", 0.0)),
+                seed_image_path="",
+                media_type=media_type,
+                guidance_scale=float(raw.get("guidance_scale", 0.0)),
+                model=raw.get("model", ""),
+                extra_meta={
+                    **(raw.get("extra_meta") or {}),
+                    "_is_remote": True,
+                    "_inventory_host": host,
+                    "_inventory_video_url": video_url,
+                    "_inventory_thumbnail_url": thumb_url,
+                    "_inventory_image_url": image_url,
+                },
+            )
+            fetched[rec_id] = rec
+
+        if not fetched:
+            return
+
+        def _apply():
+            if not self._alive:
+                return False
+            self._remote_records.update(fetched)
+            self._load_history()
+            return False
+
+        GLib.idle_add(_apply)
+
+    # ── Prompt gen launcher ─────────────────────────────────────────────────────
 
     def _on_start_prompt_gen(self) -> None:
         """

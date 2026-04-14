@@ -79,6 +79,22 @@ def _derive_prompt_url(server_url: str) -> str:
     return f"http://{host}:8001"
 
 
+def _derive_inventory_url(server_url: str) -> str:
+    """
+    Derive the inventory server URL from the inference server URL.
+
+    The inventory server (tt-ctl serve-inventory) runs on the same host at
+    port 8002.  Returns an empty string for localhost so the GUI only fetches
+    remote inventory when --server actually points at a remote machine.
+    """
+    from urllib.parse import urlparse
+    parsed = urlparse(server_url)
+    host = parsed.hostname or "localhost"
+    if host in _LOCALHOST:
+        return ""   # no remote inventory for local-only mode
+    return f"http://{host}:8002"
+
+
 def _apply_remote_host_to_config(server_url: str) -> None:
     """
     When --server points at a non-localhost host, update all service entries in
@@ -146,6 +162,7 @@ def main():
             app=application,
             server_url=args.server,
             prompt_server_url=_derive_prompt_url(args.server),
+            inventory_url=_derive_inventory_url(args.server),
         )
         win.present()
 

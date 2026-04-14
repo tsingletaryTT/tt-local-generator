@@ -28,6 +28,10 @@ Usage:
                                     Services: wan2.2 | mochi | flux | animate |
                                               skyreels | prompt-server | docker
                                     Flags: --lines N  --follow / -f
+    tt-ctl serve-inventory          Serve the local video library over HTTP
+                                    so a remote GUI (--server http://this:8000)
+                                    can browse and download it.
+                                    Flags: --port 8002  --host 0.0.0.0
 
 All commands accept --server URL to override the default http://localhost:8000.
 """
@@ -877,6 +881,31 @@ def cmd_run(args):
     print(dim(f"  gen time: {record.duration_s:.0f}s  |  model: {record.model}"))
 
 
+# ── serve-inventory ───────────────────────────────────────────────────────────
+
+def cmd_serve_inventory(args):
+    """Serve the local video library over HTTP for a remote GUI to browse.
+
+    Start this command on the machine that has the generated videos.  Then
+    run the GUI on another machine with::
+
+        ./tt-gen --server http://this-machine:8000
+
+    The GUI derives the inventory URL as http://this-machine:8002 and fetches
+    records automatically at startup.
+    """
+    import importlib, sys as _sys, logging as _logging
+    _logging.basicConfig(level=_logging.INFO, format="%(message)s")
+
+    # Import inventory_server from app/
+    _sys.path.insert(0, str(_HERE / "app"))
+    inv = importlib.import_module("inventory_server")
+
+    port = getattr(args, "port", inv.DEFAULT_PORT)
+    host = getattr(args, "host", "0.0.0.0")
+    inv.serve(port=port, host=host)
+
+
 # ── arg parsing ───────────────────────────────────────────────────────────────
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -950,6 +979,20 @@ def _build_parser() -> argparse.ArgumentParser:
     # recover
     sub.add_parser("recover", help="List server jobs not in local history")
 
+    # serve-inventory
+    inv = sub.add_parser(
+        "serve-inventory",
+        help="Share the local video library over HTTP for a remote GUI to browse",
+    )
+    inv.add_argument(
+        "--port", type=int, default=8002,
+        help="TCP port to listen on (default 8002)",
+    )
+    inv.add_argument(
+        "--host", default="0.0.0.0",
+        help="Interface to bind (default 0.0.0.0 = all interfaces)",
+    )
+
     # run
     r = sub.add_parser("run", help="Run one generation now (blocking)")
     r.add_argument("prompt")
@@ -1016,9 +1059,10 @@ def main():
         "history":  cmd_history,
         "server":   cmd_server,
         "logs":     cmd_logs,
-        "recover":  cmd_recover,
-        "run":      cmd_run,
-        "generate": cmd_generate,
+        "recover":          cmd_recover,
+        "run":              cmd_run,
+        "generate":         cmd_generate,
+        "serve-inventory":  cmd_serve_inventory,
     }
     dispatch[args.cmd](args)
 
