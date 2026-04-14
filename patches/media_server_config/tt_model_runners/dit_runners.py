@@ -442,21 +442,23 @@ class TTWan22AnimateRunner(TTDiTRunner):
 
         from PIL import Image
 
-        self.logger.debug(f"Device {self.device_id}: Running Animate inference")
+        self.logger.info(f"Device {self.device_id}: Running Animate inference")
         request = requests[0]
 
-        # Decode the character image.  Fall back to a grey dummy during warmup
-        # when reference_image_b64 is not provided by VideoGenerateRequest.model_construct.
-        # Use getattr — VideoGenerateRequest has no reference_image_b64 field; the
-        # attribute is absent on warmup requests built via model_construct().
+        # Decode the character image.  reference_image_b64 is a declared field on
+        # VideoGenerateRequest; getattr() is used defensively so warmup requests
+        # built via model_construct() (which skips field defaults) also work.
         reference_image_b64 = getattr(request, "reference_image_b64", None)
         if reference_image_b64:
             char_pil = Image.open(
                 BytesIO(base64.b64decode(reference_image_b64))
             ).convert("RGB")
+            self.logger.info(
+                f"Device {self.device_id}: character image decoded — {char_pil.size[0]}×{char_pil.size[1]}"
+            )
         else:
-            self.logger.debug(
-                f"Device {self.device_id}: No reference_image_b64 — using dummy image for warmup"
+            self.logger.info(
+                f"Device {self.device_id}: no reference_image_b64 — using grey dummy (warmup)"
             )
             char_pil = Image.new("RGB", (832, 480), color=(128, 128, 128))
 
