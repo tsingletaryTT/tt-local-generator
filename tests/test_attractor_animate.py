@@ -78,6 +78,16 @@ def test_enqueue_generation_animate_skips_when_ref_video_empty():
     win._on_enqueue.assert_not_called()
 
 
+def test_enqueue_generation_animate_skips_when_ref_char_empty():
+    """Missing ref_char alone is enough to skip enqueueing."""
+    win = _make_attractor(
+        model_source="animate",
+        get_animate_inputs=lambda: ("/tmp/motion.mp4", ""),
+    )
+    win._enqueue_generation("a prompt")
+    win._on_enqueue.assert_not_called()
+
+
 def test_enqueue_generation_video_mode_unchanged():
     """For model_source=='video', _enqueue_generation works as before (no animate inputs)."""
     win = _make_attractor(model_source="video", get_animate_inputs=None)
