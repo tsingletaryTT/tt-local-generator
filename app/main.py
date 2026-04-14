@@ -95,18 +95,21 @@ def _derive_inventory_url(server_url: str) -> str:
     return f"http://{host}:8002"
 
 
-def _apply_remote_host_to_config(server_url: str) -> None:
+def _apply_server_host_to_config(server_url: str) -> None:
     """
-    When --server points at a non-localhost host, update all service entries in
-    server_config that still have localhost/127.0.0.1 so that the Preferences
-    dialog reflects the remote host and health checks use the right addresses.
-    Writes through to ~/.config/tt-video-gen/servers.json immediately.
+    Sync the --server hostname into every service entry in server_config so
+    the Preferences dialog, health checks, and the prompt-server URL all agree
+    on the current --server host.
+
+    Called unconditionally at startup, including for localhost, so that
+    switching between local and remote (or between two remote machines) always
+    produces a clean config — the previous host is never left stale in
+    servers.json from an earlier session.
     """
     from urllib.parse import urlparse
     from server_config import server_config as _sc
     host = urlparse(server_url).hostname or "localhost"
-    if host not in _LOCALHOST:
-        _sc.apply_remote_host(host)
+    _sc.apply_remote_host(host)
 
 
 def main():
@@ -168,7 +171,7 @@ def main():
 
     # Update persisted server config so Preferences shows the right host/port
     # and the prompt-server health check hits the correct address.
-    _apply_remote_host_to_config(args.server)
+    _apply_server_host_to_config(args.server)
 
     app.connect("activate", on_activate)
     sys.exit(app.run([sys.argv[0]] + gtk_args))

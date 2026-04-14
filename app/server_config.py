@@ -137,23 +137,30 @@ class ServerConfig:
 
     def apply_remote_host(self, host: str) -> None:
         """
-        Update every service entry whose host is currently localhost or 127.0.0.1
-        to use host instead.  Writes through to disk so Preferences reflects the
-        change immediately.
+        Update every service entry to use *host*.  Writes through to disk so
+        Preferences, health checks, and the prompt-server URL all agree on the
+        current --server hostname without manual configuration.
 
-        Called at startup when --server points at a non-local machine, so all
-        health checks, the Preferences dialog, and the prompt server URL all
-        agree on the remote host without manual configuration.
+        Called unconditionally at startup with the hostname from --server.
+        This means switching between local and remote (or between two remote
+        machines) always results in a consistent config — the previous host
+        is never left stale in servers.json.
+
+        Args:
+            host: The hostname to apply to all services. Pass "localhost"
+                  when running locally (restores the default configuration).
         """
-        _local = {"localhost", "127.0.0.1"}
+        # Normalise 127.0.0.1 → localhost so the config stays human-readable.
+        if host == "127.0.0.1":
+            host = "localhost"
         changed = False
         for svc in self._data.values():
-            if svc.get("host") in _local:
+            if svc.get("host") != host:
                 svc["host"] = host
                 changed = True
         if changed:
             self._save()
-            log.info("server_config: updated all localhost entries → %s", host)
+            log.info("server_config: set all service hosts → %s", host)
 
     def all_services(self) -> dict[str, dict]:
         """Return a shallow copy of the full config dict."""
