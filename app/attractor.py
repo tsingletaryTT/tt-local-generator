@@ -407,6 +407,7 @@ class AttractorWindow(Gtk.Window):
         playlist_id: "str | None" = None,    # None = all videos; str = filter to this playlist
         auto_generate: bool = True,           # whether to run the generation loop
         get_playlists: "Callable[[], list]" = lambda: [],  # for channel switcher dropdown
+        get_animate_inputs: "Callable[[], tuple[str, str]] | None" = None,  # animate TT-TV inputs
     ) -> None:
         _log.debug("AttractorWindow.__init__ - %d records, model_source=%s", len(records), model_source)
         super().__init__(title="TT-TV")
@@ -424,6 +425,7 @@ class AttractorWindow(Gtk.Window):
         self._playlist_id: "str | None" = playlist_id
         self._auto_generate: bool = auto_generate
         self._get_playlists: Callable = get_playlists
+        self._get_animate_inputs = get_animate_inputs
         # Store ALL records so _switch_channel() can refilter from the full set.
         # MainWindow already filtered records to the chosen playlist before passing
         # them in, but we need the full list to support in-window channel switching.
@@ -1227,10 +1229,20 @@ class AttractorWindow(Gtk.Window):
         """
         Called on the main thread via GLib.idle_add.
         Forwards a generation request to MainWindow via the on_enqueue callback.
-        Uses the model defaults from the spec (steps=30, seed=-1, guidance=5.0).
+        Uses the model defaults from the spec (steps=20, seed=-1, guidance=5.0).
+
+        For animate mode, calls get_animate_inputs() to get (ref_video, ref_char).
+        Skips silently if the callback is None or returns empty strings.
         """
         if not self._alive:
             return
+        ref_video, ref_char = "", ""
+        if self._model_source == "animate":
+            if self._get_animate_inputs is None:
+                return   # not wired — skip silently
+            ref_video, ref_char = self._get_animate_inputs()
+            if not ref_video or not ref_char:
+                return   # no inputs available yet — skip this cycle
         self._on_enqueue(
             prompt=prompt,
             neg="",
@@ -1239,8 +1251,8 @@ class AttractorWindow(Gtk.Window):
             seed_image_path="",
             model_source=self._model_source,
             guidance_scale=5.0,
-            ref_video_path="",
-            ref_char_path="",
+            ref_video_path=ref_video,
+            ref_char_path=ref_char,
             animate_mode="animation",
             model_id="",
         )
