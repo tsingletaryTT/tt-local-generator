@@ -6658,10 +6658,31 @@ class MainWindow(Gtk.ApplicationWindow):
         from history_store import GenerationRecord  # noqa: PLC0415
         from urllib.parse import urlparse as _up     # noqa: PLC0415
 
-        host = _up(self._inventory_url).hostname or "remote"
+        parsed_inv  = _up(self._inventory_url)
+        host        = parsed_inv.hostname or "remote"
+        inv_port    = parsed_inv.port or 8002
+        inv_scheme  = parsed_inv.scheme or "http"
         # Cache directory for this remote host
         from history_store import STORAGE_DIR  # noqa: PLC0415
         cache_root = STORAGE_DIR / "remote-cache" / host
+
+        _LOCAL_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0"}
+
+        def _rewrite(url: str) -> str:
+            """Rewrite inventory-server-generated URLs that contain localhost.
+
+            The inventory server is bound to 0.0.0.0 and may not know its
+            external hostname, so it generates media URLs like
+            http://localhost:8002/inventory/media/... — which are unreachable
+            from the remote GUI.  Substitute the hostname/port we actually used
+            to reach the inventory server.
+            """
+            if not url:
+                return url
+            p = _up(url)
+            if p.hostname in _LOCAL_HOSTS:
+                return f"{inv_scheme}://{host}:{inv_port}{p.path}"
+            return url
 
         fetched: dict = {}
         for raw in raw_records:
@@ -6670,9 +6691,10 @@ class MainWindow(Gtk.ApplicationWindow):
                 continue
 
             media_type = raw.get("media_type", "video")
-            video_url  = raw.get("video_url", "")
-            thumb_url  = raw.get("thumbnail_url", "")
-            image_url  = raw.get("image_url", "")
+            # Rewrite any localhost URLs to use the actual remote host/port.
+            video_url  = _rewrite(raw.get("video_url", ""))
+            thumb_url  = _rewrite(raw.get("thumbnail_url", ""))
+            image_url  = _rewrite(raw.get("image_url", ""))
 
             # Build local cache paths for this remote record.
             def _cache_name(url: str) -> str:
@@ -7695,37 +7717,65 @@ class MainWindow(Gtk.ApplicationWindow):
         """
         File → Sync Videos from Server…
 
-        Downloads every video that has a local history record but whose video
-        file is missing on disk.  Useful when running the GUI on a different
-        machine from where the videos were generated, or after a fresh clone
-        with history synced but video files not yet transferred.
+        Downloads every video that has a history record (local or remote) but
+        whose video file is missing on disk.  Download sources, in priority order:
 
-        Uses the inference server's /v1/videos/generations/{id}/download
-        endpoint, so only jobs the server still has on record can be fetched.
+        1. Inventory server URL from ``extra_meta["_inventory_video_url"]`` —
+           used for remote records fetched via the inventory server.
+        2. Inference-server API (``/v1/videos/generations/{id}/download``) —
+           used for local history records whose job file the server still holds.
         """
-        missing = [
-            r for r in self._store.all_records()
-            if r.media_type in ("video", "animate")
-            and not r.video_exists
-            and r.id
-        ]
-        if not missing:
+        # Collect all records missing a local video — local store + remote inventory.
+        local_ids = {r.id for r in self._store.all_records()}
+        remote_only = [r for r in self._remote_records.values() if r.id not in local_ids]
+        candidates = (
+            [r for r in self._store.all_records()
+             if r.media_type in ("video", "animate") and not r.video_exists and r.id]
+            + [r for r in remote_only
+               if r.media_type in ("video", "animate") and not r.video_exists]
+        )
+        if not candidates:
             self._set_status("All videos are already cached locally — nothing to sync.")
             return
 
-        self._set_status(f"Syncing {len(missing)} missing video(s) from server…")
+        self._set_status(f"Syncing {len(candidates)} missing video(s)…")
 
         def _worker():
+            import requests as _req  # noqa: PLC0415
             done = 0
             failed = 0
-            for rec in missing:
+            for rec in candidates:
                 try:
-                    Path(rec.video_path).parent.mkdir(parents=True, exist_ok=True)
-                    self._client.download(rec.id, Path(rec.video_path))
+                    dest = Path(rec.video_path)
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    inv_url = (rec.extra_meta or {}).get("_inventory_video_url", "")
+                    if inv_url:
+                        # Remote inventory record — stream from inventory server.
+                        r = _req.get(inv_url, stream=True, timeout=120)
+                        r.raise_for_status()
+                        with open(dest, "wb") as fh:
+                            for chunk in r.iter_content(65_536):
+                                fh.write(chunk)
+                        # Cache thumbnail too while we're at it.
+                        thumb_url  = (rec.extra_meta or {}).get("_inventory_thumbnail_url", "")
+                        thumb_dest = Path(rec.thumbnail_path)
+                        if thumb_url and not thumb_dest.exists():
+                            try:
+                                tr = _req.get(thumb_url, stream=True, timeout=15)
+                                if tr.status_code == 200:
+                                    thumb_dest.parent.mkdir(parents=True, exist_ok=True)
+                                    with open(thumb_dest, "wb") as fh:
+                                        for chunk in tr.iter_content(65_536):
+                                            fh.write(chunk)
+                            except Exception:
+                                pass
+                    else:
+                        # Local history record — use inference-server API.
+                        self._client.download(rec.id, dest)
                     done += 1
                     GLib.idle_add(
                         self._set_status,
-                        f"Syncing… {done + failed}/{len(missing)} "
+                        f"Syncing… {done + failed}/{len(candidates)} "
                         f"({done} downloaded, {failed} failed)",
                     )
                 except Exception:
@@ -7734,11 +7784,11 @@ class MainWindow(Gtk.ApplicationWindow):
             def _finish():
                 if failed:
                     self._set_status(
-                        f"Sync complete: {done} downloaded, {failed} not found on server."
+                        f"Sync complete: {done} downloaded, {failed} unavailable."
                     )
                 else:
                     self._set_status(f"Sync complete: {done} video(s) cached locally.")
-                # Refresh gallery so cards with newly-downloaded videos update.
+                # Refresh gallery so newly-downloaded cards show their video.
                 self._load_history()
                 return False
 
