@@ -42,6 +42,19 @@ if not _log.handlers:
                                        datefmt="%Y-%m-%d %H:%M:%S"))
     _log.addHandler(_fh)
 
+# Maps internal model ID strings to short channel names shown in the TT-TV
+# channel dropdown.  Must stay in sync with _MODEL_DISPLAY in main_window.py.
+_MODEL_LABELS: dict[str, str] = {
+    "wan2.2-t2v":               "Wan2.2",
+    "mochi-1-preview":          "Mochi-1",
+    "flux.1-dev":               "FLUX",
+    "wan2.2-animate-14b":       "Animate-14B",
+    "skyreels-v2-i2v-14b-540p": "SkyReels I2V",
+}
+
+# Sentinel prefix used to encode model-virtual channels in _channel_ids.
+_MODEL_CHANNEL_PREFIX = "__model__"
+
 
 class AttractorPool:
     """
@@ -407,6 +420,7 @@ class AttractorWindow(Gtk.Window):
         playlist_id: "str | None" = None,    # None = all videos; str = filter to this playlist
         auto_generate: bool = True,           # whether to run the generation loop
         get_playlists: "Callable[[], list]" = lambda: [],  # for channel switcher dropdown
+        get_all_records: "Callable[[], list]" = lambda: [],  # full unfiltered record set for model channels
         get_animate_inputs: "Callable[[], tuple[str, str]] | None" = None,  # animate TT-TV inputs
     ) -> None:
         _log.debug("AttractorWindow.__init__ - %d records, model_source=%s", len(records), model_source)
@@ -425,6 +439,7 @@ class AttractorWindow(Gtk.Window):
         self._playlist_id: "str | None" = playlist_id
         self._auto_generate: bool = auto_generate
         self._get_playlists: Callable = get_playlists
+        self._get_all_records: Callable = get_all_records
         self._get_animate_inputs = get_animate_inputs
         # Store ALL records so _switch_channel() can refilter from the full set.
         # MainWindow already filtered records to the chosen playlist before passing
@@ -1467,7 +1482,9 @@ class AttractorWindow(Gtk.Window):
 
     def _populate_channel_dropdown(self) -> None:
         """
-        Fill the channel dropdown with "All Videos" plus every named playlist.
+        Fill the channel dropdown with "All Videos", one entry per model that
+        has at least one video record, then every named playlist.
+
         Selects the entry that matches self._playlist_id without triggering the
         notify::selected signal (called before the signal is connected).
         """
@@ -1481,12 +1498,27 @@ class AttractorWindow(Gtk.Window):
         self._channel_model.append("All Videos")
         self._channel_ids.append(None)
 
+        # Model virtual channels — one per model that has ≥1 non-image record.
+        all_records = self._get_all_records()
+        seen_models: set[str] = set()
+        for r in all_records:
+            mid = getattr(r, "model", "") or ""
+            if mid and mid not in seen_models and mid in _MODEL_LABELS:
+                if getattr(r, "media_type", "video") != "image":
+                    seen_models.add(mid)
+        # Add in canonical label order (preserves consistent ordering).
+        for mid in _MODEL_LABELS:
+            if mid in seen_models:
+                self._channel_model.append(_MODEL_LABELS[mid])
+                self._channel_ids.append(f"{_MODEL_CHANNEL_PREFIX}{mid}")
+
+        # Named playlists follow model channels.
         playlists = self._get_playlists()
         for pl in playlists:
             self._channel_model.append(pl.name)
             self._channel_ids.append(pl.id)
 
-        # Select the entry matching the current playlist
+        # Select the entry matching the current playlist_id (or model sentinel).
         selected_idx = 0
         for i, pid in enumerate(self._channel_ids):
             if pid == self._playlist_id:
@@ -1513,8 +1545,10 @@ class AttractorWindow(Gtk.Window):
             threading.Thread(target=self._generation_loop, daemon=True).start()
         # If turned off, the running thread's while condition (which checks
         # self._auto_generate) will exit at the top of the next iteration.
-        # Persist the preference to the playlist store if a playlist is active.
-        if self._playlist_id is not None:
+        # Persist the preference to the playlist store if a named playlist is
+        # active (not a model virtual channel, which has no persistent store entry).
+        if (self._playlist_id is not None
+                and not self._playlist_id.startswith(_MODEL_CHANNEL_PREFIX)):
             from playlist_store import playlist_store as _ps
             _ps.set_auto_gen(self._playlist_id, self._auto_generate)
 
@@ -1522,15 +1556,28 @@ class AttractorWindow(Gtk.Window):
         """
         Switch TT-TV to a different playlist channel without closing the window.
 
+        Handles three channel types:
+          - None                     → "All Videos" (all non-image records)
+          - "__model__{mid}"         → model virtual channel (filter by model ID)
+          - regular UUID string      → named playlist (filter by record_ids)
+
         Rebuilds the pool from the stored all_records list filtered to the new
-        playlist, updates the auto-gen switch, and triggers a channel-change
+        channel, updates the auto-gen switch, and triggers a channel-change
         flash to signal the transition to the user.
         """
         from playlist_store import playlist_store as _ps
 
         self._playlist_id = new_playlist_id
 
-        if new_playlist_id is not None:
+        if new_playlist_id is not None and new_playlist_id.startswith(_MODEL_CHANNEL_PREFIX):
+            # Model virtual channel — pull fresh full record set and filter by model.
+            model_id = new_playlist_id[len(_MODEL_CHANNEL_PREFIX):]
+            all_records = self._get_all_records()
+            filtered = [r for r in all_records
+                        if getattr(r, "model", "") == model_id
+                        and getattr(r, "media_type", "video") != "image"]
+            new_auto_gen = False   # don't generate into a model-filtered view
+        elif new_playlist_id is not None:
             pl = _ps.get(new_playlist_id)
             playlist_record_ids = set(pl.record_ids) if pl else set()
             filtered = [r for r in self._all_records

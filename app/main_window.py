@@ -2604,7 +2604,7 @@ class ControlPanel(Gtk.Box):
 
         # ── Source toggle (Video / Animate / Image) ───────────────────────────
         src_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
-        self._src_video_btn = Gtk.ToggleButton(label="🎬 Video")
+        self._src_video_btn = Gtk.ToggleButton(label="🎥 Video")
         self._src_video_btn.add_css_class("source-btn")
         self._src_video_btn.add_css_class("source-btn-left")
         self._src_video_btn.set_tooltip_text(
@@ -6744,6 +6744,9 @@ class MainWindow(Gtk.ApplicationWindow):
             records = [r for r in all_records
                        if getattr(r, "model", "") == model_filter]
             auto_generate = False   # don't auto-gen into a model-filtered view
+            # Encode as a model-virtual channel sentinel so the in-window
+            # dropdown pre-selects the right entry on open.
+            playlist_id = f"__model__{model_filter}"
         elif playlist_id is not None:
             from playlist_store import playlist_store as _ps
             pl = _ps.get(playlist_id)
@@ -6785,6 +6788,7 @@ class MainWindow(Gtk.ApplicationWindow):
                 get_playlists=lambda: (
                     __import__("playlist_store").playlist_store.all()
                 ),
+                get_all_records=lambda: self._store.all_records(),
                 get_animate_inputs=(
                     self._get_animate_inputs if current_source == "animate" else None
                 ),
