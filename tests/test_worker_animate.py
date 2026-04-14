@@ -120,6 +120,7 @@ def test_extract_last_frame_sets_extra_meta_on_success():
         patch.object(worker, "_extract_thumbnail"),
         patch.object(worker, "_write_prompt_sidecar"),
         patch("worker.subprocess.run") as mock_run,
+        patch("worker.Path.is_file", return_value=True),
     ):
         mock_run.return_value = MagicMock(returncode=0)
         worker.run_with_callbacks(

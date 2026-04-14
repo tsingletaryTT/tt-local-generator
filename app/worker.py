@@ -498,7 +498,7 @@ class AnimateGenerationWorker:
         """
         Path(last_frame_path).parent.mkdir(parents=True, exist_ok=True)
         try:
-            subprocess.run(
+            result = subprocess.run(
                 [
                     "ffmpeg", "-y",
                     "-sseof", "-0.1",
@@ -512,7 +512,7 @@ class AnimateGenerationWorker:
                 capture_output=True,
                 timeout=30,
             )
-            return True
+            return result.returncode == 0 and Path(last_frame_path).is_file()
         except (FileNotFoundError, subprocess.TimeoutExpired):
             return False
 
