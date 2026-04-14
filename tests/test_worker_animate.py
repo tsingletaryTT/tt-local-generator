@@ -102,3 +102,88 @@ def test_submit_failure_calls_on_error():
     assert finished == []
     assert len(errors) == 1
     assert "Submit failed" in errors[0]
+
+
+def test_extract_last_frame_sets_extra_meta_on_success():
+    """When ffmpeg succeeds, extra_meta['last_frame_path'] is set on the record."""
+    client = MagicMock()
+    client.submit_animate.return_value = "job-last0001"
+    client.poll_status.return_value = ("completed", None, {})
+    client.download.return_value = None
+
+    store = MagicMock()
+    finished_records = []
+
+    worker = _make_worker(client, store)
+
+    with (
+        patch.object(worker, "_extract_thumbnail"),
+        patch.object(worker, "_write_prompt_sidecar"),
+        patch("worker.subprocess.run") as mock_run,
+    ):
+        mock_run.return_value = MagicMock(returncode=0)
+        worker.run_with_callbacks(
+            on_progress=lambda msg: None,
+            on_finished=lambda rec: finished_records.append(rec),
+            on_error=lambda msg: None,
+        )
+
+    assert len(finished_records) == 1
+    rec = finished_records[0]
+    assert "last_frame_path" in rec.extra_meta
+    assert rec.extra_meta["last_frame_path"].endswith("_last.jpg")
+
+
+def test_extract_last_frame_skips_extra_meta_on_ffmpeg_failure():
+    """When ffmpeg raises FileNotFoundError, extra_meta is not set."""
+    client = MagicMock()
+    client.submit_animate.return_value = "job-last0002"
+    client.poll_status.return_value = ("completed", None, {})
+    client.download.return_value = None
+
+    store = MagicMock()
+    finished_records = []
+
+    worker = _make_worker(client, store)
+
+    with (
+        patch.object(worker, "_extract_thumbnail"),
+        patch.object(worker, "_write_prompt_sidecar"),
+        patch("worker.subprocess.run", side_effect=FileNotFoundError),
+    ):
+        worker.run_with_callbacks(
+            on_progress=lambda msg: None,
+            on_finished=lambda rec: finished_records.append(rec),
+            on_error=lambda msg: None,
+        )
+
+    assert len(finished_records) == 1
+    assert "last_frame_path" not in finished_records[0].extra_meta
+
+
+def test_extract_last_frame_uses_sseof_flag():
+    """ffmpeg is called with -sseof to seek from end, not -ss 0."""
+    client = MagicMock()
+    client.submit_animate.return_value = "job-last0003"
+    client.poll_status.return_value = ("completed", None, {})
+    client.download.return_value = None
+
+    store = MagicMock()
+    worker = _make_worker(client, store)
+
+    captured_calls = []
+
+    with (
+        patch.object(worker, "_extract_thumbnail"),
+        patch.object(worker, "_write_prompt_sidecar"),
+        patch("worker.subprocess.run") as mock_run,
+    ):
+        mock_run.side_effect = lambda args, **kw: captured_calls.append(args) or MagicMock(returncode=0)
+        worker.run_with_callbacks(
+            on_progress=lambda msg: None,
+            on_finished=lambda rec: None,
+            on_error=lambda msg: None,
+        )
+
+    assert any("-sseof" in args for args in captured_calls), \
+        f"Expected -sseof in ffmpeg call, got: {captured_calls}"

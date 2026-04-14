@@ -424,6 +424,17 @@ class AnimateGenerationWorker:
         # ── 5. Thumbnail ───────────────────────────────────────────────────────
         self._extract_thumbnail(record.video_path, record.thumbnail_path)
 
+        # ── 5b. Last frame ─────────────────────────────────────────────────────
+        # Extract the final frame so the TT-TV auto-generation loop can use it
+        # as a character reference for the next clip in the continuity chain.
+        last_frame_path = str(
+            Path(record.thumbnail_path).with_stem(
+                Path(record.thumbnail_path).stem + "_last"
+            )
+        )
+        if self._extract_last_frame(record.video_path, last_frame_path):
+            record.extra_meta["last_frame_path"] = last_frame_path
+
         # ── 6. Sidecar ─────────────────────────────────────────────────────────
         self._write_prompt_sidecar(record)
 
@@ -443,6 +454,7 @@ class AnimateGenerationWorker:
             f"prompt: {record.prompt}",
             f"reference_video: {self._ref_video}",
             f"reference_image: {self._ref_image}",
+            f"last_frame: {record.extra_meta.get('last_frame_path', '')}",
             f"steps: {record.num_inference_steps}",
             f"seed: {record.seed}",
             f"generated: {record.created_at}",
@@ -472,6 +484,37 @@ class AnimateGenerationWorker:
             )
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
+
+    def _extract_last_frame(self, video_path: str, last_frame_path: str) -> bool:
+        """Extract the last frame of the video as a JPEG via ffmpeg.
+
+        Uses -sseof -0.1 to seek 0.1 s from the end of the video, then grabs
+        a single frame.  This gives the TT-TV auto-generation loop a character
+        reference image for continuity chaining into the next clip.
+
+        Returns True on success, False on any ffmpeg error (FileNotFoundError
+        if ffmpeg is not installed, or TimeoutExpired).  The caller decides
+        whether to record the path in extra_meta.
+        """
+        Path(last_frame_path).parent.mkdir(parents=True, exist_ok=True)
+        try:
+            subprocess.run(
+                [
+                    "ffmpeg", "-y",
+                    "-sseof", "-0.1",
+                    "-i", video_path,
+                    "-vframes", "1",
+                    "-q:v", "2",
+                    "-update", "1",
+                    last_frame_path,
+                ],
+                stdin=subprocess.DEVNULL,
+                capture_output=True,
+                timeout=30,
+            )
+            return True
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return False
 
 
 # ── FLUX image generation worker ───────────────────────────────────────────────
