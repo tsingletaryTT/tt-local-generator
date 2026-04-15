@@ -2024,19 +2024,32 @@ class DetailPanel(Gtk.ScrolledWindow):
         return lbl
 
     def _toggle_play(self, _btn) -> None:
+        import sys as _sys
         if self._video_widget is None:
             return
         stream = self._video_widget.get_media_stream()
         if stream is None:
-            # Stream is None → GTK4 has no working GStreamer media backend on this
-            # machine.  Print actionable hint to stderr so it shows in the terminal.
-            import sys as _sys
+            # Stream is None → GTK4 found no working GStreamer media backend.
             print(
                 "[GTK video] get_media_stream() returned None — "
                 "GTK4 GStreamer backend not found.\n"
                 "  On macOS: brew install gstreamer gst-plugins-base "
                 "gst-plugins-good gst-plugins-bad gst-libav\n"
-                "  Then relaunch via ./tt-gen (sets GST_PLUGIN_PATH automatically).",
+                "  Relaunch via ./tt-gen (sets GST_PLUGIN_PATH automatically).\n"
+                "  Diagnostic: ./bin/test_macos.sh",
+                file=_sys.stderr,
+            )
+            return
+        # Check whether the stream is already in an error state (e.g. missing
+        # codec, unreadable file).  stream.play() on an errored stream is a
+        # silent no-op — detect it here so the error appears in the terminal.
+        err = stream.get_error()
+        if err is not None:
+            print(
+                f"[GTK video] GStreamer stream error (cannot play):\n"
+                f"  {err.message}\n"
+                f"  path: {getattr(self._record, 'video_path', '?')}\n"
+                f"  Diagnostic: ./bin/test_macos.sh",
                 file=_sys.stderr,
             )
             return
