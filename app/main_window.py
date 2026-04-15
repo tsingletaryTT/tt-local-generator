@@ -1793,6 +1793,38 @@ class DetailPanel(Gtk.ScrolledWindow):
             self._video_widget.set_halign(Gtk.Align.START)
             content.append(self._video_widget)
 
+            # Wire GStreamer error reporting.  The media stream is created lazily
+            # (None until the Gtk.Video widget is realised), so we retry until
+            # it's available.  This surfaces codec / backend errors in the
+            # terminal (stderr) and via a status-bar flash rather than silently
+            # showing a blank frame.
+            _video_ref = self._video_widget
+
+            def _connect_stream_error(play_btn_ref=self._play_btn if hasattr(self, '_play_btn') else None):
+                if _video_ref is None or _video_ref.get_parent() is None:
+                    return False  # widget was replaced — stop retry
+                stream = _video_ref.get_media_stream()
+                if stream is None:
+                    return True  # not realised yet — retry in 200 ms
+                def _on_stream_error(s, _param):
+                    err = s.get_error()
+                    if err:
+                        import logging as _log
+                        _log.getLogger(__name__).warning(
+                            "GTK media stream error (path=%s): %s",
+                            record.video_path, err.message,
+                        )
+                        print(
+                            f"[GTK video] GStreamer error: {err.message}\n"
+                            f"  path: {record.video_path}\n"
+                            f"  hint: check GST_PLUGIN_PATH / install gst-libav",
+                            file=__import__('sys').stderr,
+                        )
+                stream.connect("notify::error", _on_stream_error)
+                return False  # connected — stop retry
+
+            GLib.timeout_add(200, _connect_stream_error)
+
             ctrl_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
             self._play_btn = Gtk.Button(label="▶ Play")
             self._play_btn.connect("clicked", self._toggle_play)
@@ -1996,6 +2028,17 @@ class DetailPanel(Gtk.ScrolledWindow):
             return
         stream = self._video_widget.get_media_stream()
         if stream is None:
+            # Stream is None → GTK4 has no working GStreamer media backend on this
+            # machine.  Print actionable hint to stderr so it shows in the terminal.
+            import sys as _sys
+            print(
+                "[GTK video] get_media_stream() returned None — "
+                "GTK4 GStreamer backend not found.\n"
+                "  On macOS: brew install gstreamer gst-plugins-base "
+                "gst-plugins-good gst-plugins-bad gst-libav\n"
+                "  Then relaunch via ./tt-gen (sets GST_PLUGIN_PATH automatically).",
+                file=_sys.stderr,
+            )
             return
         if stream.get_playing():
             stream.pause()
