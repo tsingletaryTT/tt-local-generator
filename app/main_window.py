@@ -5100,10 +5100,12 @@ _RECOVERY_DISMISS = Gtk.ResponseType.REJECT   # reuse a built-in int constant fo
 class RecoveryDialog(Gtk.Dialog):
     """Modal dialog listing unknown server jobs; user selects which to recover.
 
-    Buttons:
+    Buttons (duplicated at top and bottom for long lists):
       Cancel        — close without recovering or dismissing anything.
       🚫 Ignore     — permanently hide the checked jobs from future scans.
       ✓ Recover     — recover the checked jobs (default action).
+
+    The job list is scrollable so the dialog stays usable even with many entries.
 
     After the dialog emits a response, inspect:
       .selected_jobs  — jobs to recover  (populated on OK / Recover)
@@ -5112,12 +5114,13 @@ class RecoveryDialog(Gtk.Dialog):
 
     def __init__(self, parent, jobs: list):
         super().__init__(title="Recover Server Jobs", transient_for=parent, modal=True)
-        self.set_default_size(520, -1)
+        self.set_default_size(560, 480)
         self.selected_jobs: list = []
         self.dismissed_jobs: list = []
         self._checkboxes: list = []
         self._jobs = jobs
 
+        # Bottom action area (standard dialog buttons)
         self.add_button("Cancel",       Gtk.ResponseType.CANCEL)
         self.add_button("🚫 Ignore",    _RECOVERY_DISMISS)
         self.add_button("✓ Recover",    Gtk.ResponseType.OK)
@@ -5126,7 +5129,7 @@ class RecoveryDialog(Gtk.Dialog):
         content = self.get_content_area()
         content.set_spacing(8)
         content.set_margin_top(12)
-        content.set_margin_bottom(12)
+        content.set_margin_bottom(4)
         content.set_margin_start(12)
         content.set_margin_end(12)
 
@@ -5140,6 +5143,29 @@ class RecoveryDialog(Gtk.Dialog):
         header.set_xalign(0)
         content.append(header)
 
+        # Top action bar — mirrors the bottom buttons so the user never has to
+        # scroll down to submit when the list is long.
+        top_bar = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        top_bar.set_margin_top(4)
+        top_bar.set_margin_bottom(4)
+        lbl = Gtk.Label(label="Quick actions:")
+        lbl.set_xalign(0)
+        top_bar.append(lbl)
+        spacer = Gtk.Box()
+        spacer.set_hexpand(True)
+        top_bar.append(spacer)
+        for label_text, resp in (
+            ("Cancel",      Gtk.ResponseType.CANCEL),
+            ("🚫 Ignore",   _RECOVERY_DISMISS),
+            ("✓ Recover",   Gtk.ResponseType.OK),
+        ):
+            btn = Gtk.Button(label=label_text)
+            btn.connect("clicked", lambda _b, r=resp: self.response(r))
+            top_bar.append(btn)
+        content.append(top_bar)
+
+        # Scrollable list of checkboxes
+        list_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4)
         for job in jobs:
             short = job["prompt"][:80] + ("…" if len(job["prompt"]) > 80 else "")
             label = f"[{job['status']}]  {short}  (id: {job['id'][:8]})"
@@ -5147,7 +5173,14 @@ class RecoveryDialog(Gtk.Dialog):
             cb.set_active(True)
             cb.job = job  # plain Python attribute — GObject set_data() is unsupported in PyGObject
             self._checkboxes.append(cb)
-            content.append(cb)
+            list_box.append(cb)
+
+        scroll = Gtk.ScrolledWindow()
+        scroll.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
+        scroll.set_vexpand(True)
+        scroll.set_margin_top(4)
+        scroll.set_child(list_box)
+        content.append(scroll)
 
         self.connect("response", self._on_response)
 
