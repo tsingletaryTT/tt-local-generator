@@ -1,18 +1,19 @@
 #!/usr/bin/env bash
 # apply_patches.sh — Apply tt-local-generator patches to a tt-inference-server checkout.
 #
-# What this does:
-#   1. Copies patches/tt_dit/ into <tt-inference-server>/patches/tt_dit/ so the
-#      hotpatched DiT pipeline files are available for bind-mounting by run.py.
+# What this does (7 steps):
+#   1-2. Copies and wires in patches/tt_dit/ DiT pipeline hotfixes (dev_mode).
+#   3-4. Copies and wires in patches/media_server_config/ device config overrides.
+#   5.   Injects HF_HOME bind-mount so the container finds ~/.cache/huggingface.
+#   6-7. Injects SkyReels-V2 T2V and I2V ModelSpecTemplates into model_spec.py.
 #
-#   2. Inserts the tt_dit hotpatch block into
-#      <tt-inference-server>/workflows/run_docker_server.py if it is not already
-#      present.  The block teaches run_docker_server.py to bind-mount any .py files
-#      under patches/tt_dit/ over the corresponding paths inside the container.
+# By default this patches vendor/tt-inference-server/ (set up by setup_vendor.sh).
+# Use --dev to patch ~/code/tt-inference-server instead (your dev checkout).
 #
 # Usage:
-#   ./apply_patches.sh                        # uses ~/code/tt-inference-server
-#   ./apply_patches.sh /path/to/tt-inference-server
+#   ./apply_patches.sh                        # patch vendor/tt-inference-server
+#   ./apply_patches.sh --dev                  # patch ~/code/tt-inference-server
+#   ./apply_patches.sh /path/to/tt-inference-server   # patch an explicit path
 #   ./apply_patches.sh --help
 
 set -euo pipefail
@@ -24,18 +25,41 @@ PATCHES_SRC="$REPO_ROOT/patches"
 # ── Args ─────────────────────────────────────────────────────────────────────
 
 if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
-    sed -n '2,12p' "$0" | sed 's/^# \?//'
+    sed -n '2,15p' "$0" | sed 's/^# \?//'
     exit 0
 fi
 
-# Default: prefer vendor/ inside the repo (portable), fall back to dev checkout.
-_DEFAULT_INFER="$REPO_ROOT/vendor/tt-inference-server"
-[[ -d "$_DEFAULT_INFER" ]] || _DEFAULT_INFER="$HOME/code/tt-inference-server"
-TT_INFER="${1:-$_DEFAULT_INFER}"
+VENDOR_DIR="$REPO_ROOT/vendor/tt-inference-server"
+DEV_DIR="$HOME/code/tt-inference-server"
+
+if [[ "${1:-}" == "--dev" ]]; then
+    # Explicit dev-checkout mode — never set up or modify vendor/
+    TT_INFER="$DEV_DIR"
+    if [[ ! -d "$TT_INFER" ]]; then
+        echo "ERROR: dev checkout not found at $TT_INFER"
+        echo "Clone it first: git clone https://github.com/tenstorrent/tt-inference-server.git $TT_INFER"
+        exit 1
+    fi
+elif [[ -n "${1:-}" && "${1:-}" != --* ]]; then
+    # Explicit path
+    TT_INFER="$1"
+    if [[ ! -d "$TT_INFER" ]]; then
+        echo "ERROR: tt-inference-server not found at $TT_INFER"
+        exit 1
+    fi
+else
+    # Default: vendor/ — set it up now if absent
+    if [[ ! -d "$VENDOR_DIR/.git" ]]; then
+        echo "vendor/tt-inference-server not found — running setup_vendor.sh first…"
+        echo ""
+        "$SCRIPT_DIR/setup_vendor.sh"
+        echo ""
+    fi
+    TT_INFER="$VENDOR_DIR"
+fi
 
 if [[ ! -d "$TT_INFER" ]]; then
     echo "ERROR: tt-inference-server not found at $TT_INFER"
-    echo "Usage: $0 [/path/to/tt-inference-server]"
     exit 1
 fi
 
