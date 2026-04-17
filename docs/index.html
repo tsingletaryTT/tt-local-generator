@@ -221,13 +221,20 @@
     }
     .hero-cli .prompt-char { color: var(--muted); }
 
-    /* Screenshot */
+    /* Screenshot — full-bleed, breaks out of the .hero-inner max-width */
+    .hero-screenshot-wrap {
+      margin-top: 3rem;
+      padding: 0 clamp(.5rem, 2vw, 2rem);
+    }
     .hero-screenshot {
       position: relative;
       border-radius: var(--radius);
       overflow: hidden;
       border: 1px solid var(--border);
       box-shadow: 0 32px 80px rgba(0,0,0,.6), 0 0 0 1px rgba(79,209,197,.08);
+      /* Render at native width up to the full viewport, unconstrained by .hero-inner */
+      width: 100%;
+      max-width: none;
     }
     .hero-screenshot img {
       width: 100%;
@@ -238,7 +245,7 @@
       content: '';
       position: absolute;
       bottom: 0; left: 0; right: 0;
-      height: 35%;
+      height: 30%;
       background: linear-gradient(transparent, var(--bg0));
       pointer-events: none;
     }
@@ -741,7 +748,10 @@
         git clone https://github.com/tenstorrent/tt-local-generator &amp;&amp; ./tt-gen
       </div>
     </div>
+  </div>
 
+  <!-- Screenshot lives outside hero-inner so it can span full viewport width -->
+  <div class="hero-screenshot-wrap">
     <div class="hero-screenshot">
       <img src="assets/tt-local-generator-main.png"
            alt="tt-local-generator main interface — video generation, history gallery, and TT-TV mode"
@@ -1247,20 +1257,20 @@
 
     <div class="pose-cat-label">Gestures</div>
     <div class="pose-grid">
-      <div class="pose-card" tabindex="0" aria-label="Hang loose — shaka sign">
-        <img src="motion_clips/gestures/hang_loose.jpg" alt="Shaka sign reference frame" loading="lazy">
-        <video class="pose-vid" src="motion_clips/gestures/hang_loose.mp4" muted loop playsinline preload="none"></video>
+      <div class="pose-card" tabindex="0" aria-label="Thumbs up">
+        <img src="motion_clips/gestures/thumbs_up.jpg" alt="Thumbs up reference frame" loading="lazy">
+        <video class="pose-vid" src="motion_clips/gestures/thumbs_up.mp4" muted loop playsinline preload="none"></video>
         <div class="pose-label">
-          Hang Loose
-          <span class="pose-model-tag">Wan2.2-T2V · shaka sign</span>
+          Thumbs Up
+          <span class="pose-model-tag">Wan2.2-T2V · approval gesture</span>
         </div>
       </div>
-      <div class="pose-card" tabindex="0" aria-label="Live long and prosper — Vulcan salute">
-        <img src="motion_clips/gestures/live_long_and_prosper.jpg" alt="Vulcan salute reference frame" loading="lazy">
-        <video class="pose-vid" src="motion_clips/gestures/live_long_and_prosper.mp4" muted loop playsinline preload="none"></video>
+      <div class="pose-card" tabindex="0" aria-label="Peace sign">
+        <img src="motion_clips/gestures/peace_sign.jpg" alt="Peace sign reference frame" loading="lazy">
+        <video class="pose-vid" src="motion_clips/gestures/peace_sign.mp4" muted loop playsinline preload="none"></video>
         <div class="pose-label">
-          Live Long &amp; Prosper
-          <span class="pose-model-tag">Wan2.2-T2V · Vulcan salute</span>
+          Peace Sign
+          <span class="pose-model-tag">Wan2.2-T2V · V gesture</span>
         </div>
       </div>
       <div class="pose-card" tabindex="0" aria-label="Hang in there — grip and dangle">
